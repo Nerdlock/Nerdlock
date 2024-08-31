@@ -2,9 +2,9 @@ import { Decoder, Encoder } from "./Encoding";
 import { ProposalType } from "./Enums";
 import InvalidObjectError from "./errors/InvalidObjectError";
 import { EncodeKeyPackage } from "./messages/KeyPackage";
-import { DecodeAddProposal, type AddProposal } from "./proposals/Add";
-import { DecodeRemoveProposal, type RemoveProposal } from "./proposals/Remove";
-import { DecodeUpdateProposal, type UpdateProposal } from "./proposals/Update";
+import { DecodeAddProposal, IsAddProposal, type AddProposal } from "./proposals/Add";
+import { DecodeRemoveProposal, IsRemoveProposal, type RemoveProposal } from "./proposals/Remove";
+import { DecodeUpdateProposal, IsUpdateProposal, type UpdateProposal } from "./proposals/Update";
 import { EncodeLeafNode } from "./RatchetTree";
 import Uint16 from "./types/Uint16";
 
@@ -59,5 +59,9 @@ function DecodeProposal(decoder: Decoder) {
     }
 }
 
+function IsProposal(object: unknown): object is Proposal {
+    return IsAddProposal(object) || IsUpdateProposal(object) || IsRemoveProposal(object);
+}
+
 export type { Proposal, ProposalBase };
-export { IsProposalBase, EncodeProposal, DecodeProposal };
+export { IsProposalBase, EncodeProposal, DecodeProposal, IsProposal };

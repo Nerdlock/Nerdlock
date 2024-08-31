@@ -8,7 +8,7 @@ import { IsKeyPackage, type KeyPackage } from "./messages/KeyPackage";
 import { IsPrivateMessage, type PrivateMessage } from "./messages/PrivateMessage";
 import { IsPublicMessage, type PublicMessage } from "./messages/PublicMessage";
 import { IsWelcome, type Welcome } from "./messages/Welcome";
-import type { Proposal } from "./Proposal";
+import { IsProposal, type Proposal } from "./Proposal";
 import Uint16 from "./types/Uint16";
 import Uint32 from "./types/Uint32";
 import Uint64 from "./types/Uint64";
@@ -43,13 +43,7 @@ function IsSenderBase(object: unknown): object is SenderBase {
         typeof object === "object" &&
         object !== null &&
         "sender_type" in object &&
-        typeof object.sender_type === "number" &&
-        [
-            SenderType.member,
-            SenderType.external,
-            SenderType.new_member_proposal,
-            SenderType.new_member_commit
-        ].includes(object.sender_type)
+        typeof object.sender_type === "number"
     )
 }
 
@@ -61,8 +55,7 @@ function IsSenderMember(object: unknown): object is SenderMember {
     return (
         object.sender_type === SenderType.member &&
         "leaf_index" in object &&
-        object.leaf_index instanceof Uint32 &&
-        Object.keys(object).length === 2
+        object.leaf_index instanceof Uint32
     );
 }
 
@@ -74,8 +67,7 @@ function IsSenderExternal(object: unknown): object is SenderExternal {
     return (
         object.sender_type === SenderType.external &&
         "sender_index" in object &&
-        object.sender_index instanceof Uint32 &&
-        Object.keys(object).length === 2
+        object.sender_index instanceof Uint32
     );
 }
 
@@ -85,8 +77,7 @@ function IsSenderNewMemberProposal(object: unknown): object is SenderNewMemberPr
     }
     // sender_type is SenderType.new_member_proposal
     return (
-        object.sender_type === SenderType.new_member_proposal &&
-        Object.keys(object).length === 1
+        object.sender_type === SenderType.new_member_proposal
     );
 }
 
@@ -96,8 +87,7 @@ function IsSenderNewMemberCommit(object: unknown): object is SenderNewMemberComm
     }
     // sender_type is SenderType.new_member_commit
     return (
-        object.sender_type === SenderType.new_member_commit &&
-        Object.keys(object).length === 1
+        object.sender_type === SenderType.new_member_commit
     );
 }
 
@@ -112,7 +102,7 @@ function IsSender(object: unknown): object is Sender {
 
 function EncodeSender(sender: Sender): Uint8Array {
     const encoder = new Encoder();
-    encoder.writeUint(new Uint8(sender.sender_type));
+    encoder.writeUint(Uint8.from(sender.sender_type));
     const isSenderOrExternal = IsSenderMember(sender) || IsSenderExternal(sender);
     if (isSenderOrExternal) {
         if (IsSenderMember(sender)) {
@@ -187,11 +177,6 @@ function IsFramedContentBase(object: unknown): object is FramedContentBase {
         object.epoch instanceof Uint64 &&
         IsSender(object.sender) &&
         typeof object.content_type === "number" &&
-        [
-            ContentType.application,
-            ContentType.proposal,
-            ContentType.commit
-        ].includes(object.content_type) &&
         "authenticated_data" in object &&
         object.authenticated_data instanceof Uint8Array
     );
@@ -217,8 +202,8 @@ function IsFramedContentProposal(object: unknown): object is FramedContentPropos
     // proposal is Proposal
     return (
         object.content_type === ContentType.proposal &&
-        "proposal" in object //&&
-        //IsProposal(object.proposal)
+        "proposal" in object &&
+        IsProposal(object.proposal)
     );
 }
 
@@ -403,15 +388,7 @@ function IsMLSMessageBase(object: unknown): object is MLSMessageBase {
         "version" in object &&
         "wire_format" in object &&
         typeof object.version === "number" &&
-        typeof object.wire_format === "number" &&
-        object.version === ProtocolVersion.mls10 &&
-        [
-            WireFormat.mls_public_message,
-            WireFormat.mls_private_message,
-            WireFormat.mls_welcome,
-            WireFormat.mls_group_info,
-            WireFormat.mls_key_package
-        ].includes(object.wire_format)
+        typeof object.wire_format === "number"
     );
 }
 
