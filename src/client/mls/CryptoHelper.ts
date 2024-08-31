@@ -12,6 +12,7 @@ import { CipherSuiteType } from "./Enums";
 import Uint16 from "./types/Uint16";
 import { sha256 } from "@noble/hashes/sha256";
 import { x25519 } from "@noble/curves/ed25519";
+import { hmac } from "@noble/hashes/hmac";
 
 // required polyfills
 ed25519.etc.sha512Sync = (...m) => sha512(ed25519.etc.concatBytes(...m))
@@ -327,4 +328,9 @@ function GetCurrentTime() {
     return BigInt(Math.floor(Date.now() / 1000))
 }
 
-export { SignWithLabel, VerifyWithLabel, GenerateKeyPair, DecodeCipherSuiteType, EncryptWithLabel, DecryptWithLabel, ExpandWithLabel, DeriveSecret, Hash, Extract, ArraysEqual, GetAllCipherSuites, GetCurrentTime, GenerateSigningKeyPair };
+async function MAC(key: Uint8Array, data: Uint8Array, cipherSuite: CipherSuiteType) {
+    const hashFunction = GetHashFunction(cipherSuite);
+    return hmac.create(hashFunction, key).update(data).digest();
+}
+
+export { SignWithLabel, VerifyWithLabel, GenerateKeyPair, DecodeCipherSuiteType, EncryptWithLabel, DecryptWithLabel, ExpandWithLabel, DeriveSecret, Hash, Extract, ArraysEqual, GetAllCipherSuites, GetCurrentTime, GenerateSigningKeyPair, MAC };

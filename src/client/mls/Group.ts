@@ -1,24 +1,26 @@
 import type { Credential } from "./Credential";
-import { ArraysEqual, DecodeCipherSuiteType, GenerateKeyPair, GenerateSigningKeyPair, GetCurrentTime, SignWithLabel, VerifyWithLabel } from "./CryptoHelper";
+import { ArraysEqual, DecodeCipherSuiteType, GenerateKeyPair, GenerateSigningKeyPair, GetCurrentTime, MAC, SignWithLabel, VerifyWithLabel } from "./CryptoHelper";
 import { CipherSuiteType, CredentialType, ExtensionType, LeafNodeSource, ProtocolVersion } from "./Enums";
 import InvalidObjectError from "./errors/InvalidObjectError";
 import type { Extension } from "./Extension";
-import { EncodeGroupContext, type GroupContext } from "./GroupContext";
+import { type GroupContext } from "./GroupContext";
+import KeySchedule from "./KeySchedule";
 import { ConstructKeyPackageSignatureData, type KeyPackage } from "./messages/KeyPackage";
 import type { AddProposal } from "./proposals/Add";
 import type { UpdateProposal } from "./proposals/Update";
-import RatchetTree from "./RatchetTree";
-import { ConstructLeafNodeSignatureData, GetDefaultCapabilities, type LeafNode } from "./RatchetTree";
+import RatchetTree, { ConstructLeafNodeSignatureData, GetDefaultCapabilities, type LeafNode } from "./RatchetTree";
 import type Uint32 from "./types/Uint32";
 import Uint64 from "./types/Uint64";
 
 class Group {
     #ratchetTree: RatchetTree;
     #groupContext: GroupContext;
+    #keySchedule: KeySchedule;
 
-    constructor(ratchetTree: RatchetTree, groupContext: GroupContext) {
+    constructor(ratchetTree: RatchetTree, groupContext: GroupContext, keySchedule: KeySchedule) {
         this.#ratchetTree = ratchetTree;
         this.#groupContext = groupContext;
+        this.#keySchedule = keySchedule;
     }
 
     async validateKeyPackage(keyPackage: KeyPackage) {
@@ -96,11 +98,11 @@ class Group {
             throw new InvalidObjectError("Leaf node source does not match the source");
         }
         // if this is coming from an update proposal, verify that thew new encryption_key iis different than the previous one
-        if(source === LeafNodeSource.update) {
-            if(prev_leaf_node == null) {
+        if (source === LeafNodeSource.update) {
+            if (prev_leaf_node == null) {
                 throw new Error("Previous leaf node is missing");
             }
-            if(ArraysEqual(prev_leaf_node.encryption_key, node.encryption_key)) {
+            if (ArraysEqual(prev_leaf_node.encryption_key, node.encryption_key)) {
                 throw new InvalidObjectError("Encryption key is the same as the previous one");
             }
         }
@@ -119,7 +121,7 @@ class Group {
     async processAddProposal(proposal: AddProposal) {
         // the proposal is only valid, if the key_package is valid
         const keyPackageValid = await this.validateKeyPackage(proposal.key_package).catch(() => false);
-        if(!keyPackageValid) {
+        if (!keyPackageValid) {
             throw new InvalidObjectError("Key package is not valid");
         }
         // add the new leaf node to the tree
@@ -129,7 +131,7 @@ class Group {
     async processUpdateProposal(proposal: UpdateProposal, prevLeafNode: LeafNode, leaf_index: Uint32) {
         // the proposal is only valid, if the leaf_node is valid
         const leafNodeValid = await this.validateLeafNode(proposal.leaf_node, LeafNodeSource.update, leaf_index, prevLeafNode).catch(() => false);
-        if(!leafNodeValid) {
+        if (!leafNodeValid) {
             throw new InvalidObjectError("Leaf node is not valid");
         }
         // update the leaf node in the tree
@@ -138,11 +140,15 @@ class Group {
         const nodes = this.#ratchetTree.directPath(this.#ratchetTree.getIndexedNode(leaf_index.value));
         // pop the last node (the node)
         nodes.pop();
-        for(const node of nodes) {
+        for (const node of nodes) {
             this.#ratchetTree.setNode(node.index, undefined);
         }
     }
 
+    /**
+     * Create a new group with the given parameters.
+     * After the group is created, the DS will be contacted and the function will fail if the DS rejects the group.
+     */
     static async create(signatureKeyPub: Uint8Array, signatureKeyPriv: Uint8Array, credential: Credential, clientExtensions: Extension<ExtensionType.application_id>[], groupExtensions: Extension<ExtensionType.required_capabilities>[], cipherSuite: CipherSuiteType) {
         const suite = DecodeCipherSuiteType(cipherSuite);
         // generate a new encryption keypair
@@ -178,11 +184,42 @@ class Group {
             extensions: groupExtensions,
             tree_hash: await ratchetTree.hash(ratchetTree.root, cipherSuite)
         } satisfies GroupContext;
-        console.log(EncodeGroupContext(groupContext), groupContext);
+        // construct the key schedule
+        const epochSecret = crypto.getRandomValues(new Uint8Array(suite.kdf.hashSize));
+        const keySchedule = await KeySchedule.fromEpochSecret(epochSecret, cipherSuite);
+        const group = new Group(ratchetTree, groupContext, keySchedule);
+        // construct the confirmation_tag
+        const confirmation_key = keySchedule.getSecret("confirmation_key");
+        if (confirmation_key == null) {
+            throw new Error("Confirmation key not set");
+        }
+        const confirmation_tag = await MAC(confirmation_key, group.#groupContext.confirmed_transcript_hash, cipherSuite);
+        // compute the interim transcript hash
+        await keySchedule.computeInterimTranscriptHash(group.#groupContext.confirmed_transcript_hash, confirmation_tag);
+        // the group is ready, ask the DS to validate the group
+        // TODO: implement the DS
         return {
-            group: new Group(ratchetTree, groupContext),
+            group,
             encryptionKeyPair
         }
+    }
+
+    /**
+     * Serialize the group as a raw Uint8Array. Used for storing on the client for later deserialization.
+     * WARNING: This method will return data that could potentially be used to compromise the security of the group. DO NOT SEND OUTSIDE THE CLIENT AT ALL TIMES.
+     * @returns The serialized group.
+     */
+    serialize() {
+        throw new Error("Not implemented");
+    }
+
+    /**
+     * Construct a group from a serialized Uint8Array. Used for deserializing a group from storage.
+     * @param data The serialized group.
+     * @returns The deserialized group.
+     */
+    static deserialize(data: Uint8Array) {
+        throw new Error("Not implemented");
     }
 }
 
@@ -192,5 +229,5 @@ const credential = {
     credential_type: CredentialType.basic,
     identity: new TextEncoder().encode("test"),
 } satisfies Credential;
-const {group, encryptionKeyPair} = await Group.create(signingKeyPair.publicKey, signingKeyPair.privateKey, credential, [], [], cipherSuite);
+const { group, encryptionKeyPair } = await Group.create(signingKeyPair.publicKey, signingKeyPair.privateKey, credential, [], [], cipherSuite);
 console.log(group, encryptionKeyPair);
