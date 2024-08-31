@@ -1,11 +1,11 @@
 import ArrayTree, { type IndexedType } from "./ArrayTree";
 import { DecodeCredential, EncodeCredential, IsCredential, type Credential } from "./Credential";
-import { GetAllCipherSuites, Hash } from "./CryptoHelper";
+import { GenerateKeyPair, GetAllCipherSuites, GetCurrentTime, Hash, SignWithLabel } from "./CryptoHelper";
 import { Decoder, Encoder } from "./Encoding";
 import { CredentialType, ExtensionType, LeafNodeSource, ProtocolVersion, type CipherSuiteType, type ProposalType } from "./Enums";
 import EncodeError from "./errors/EncodeError";
 import InvalidObjectError from "./errors/InvalidObjectError";
-import { DecodeExtension, EncodeExtension, type Extension } from "./Extension";
+import { DecodeExtension, EncodeExtension, IsExtension, type Extension } from "./Extension";
 import Uint16 from "./types/Uint16";
 import Uint32 from "./types/Uint32";
 import Uint64 from "./types/Uint64";
@@ -188,8 +188,8 @@ function DecodeLifetime(decoder: Decoder): Lifetime {
     const lifetime = {
         not_before,
         not_after
-    }
-    if(!IsLifeTime(lifetime)) {
+    };
+    if (!IsLifeTime(lifetime)) {
         throw new InvalidObjectError("Invalid lifetime");
     }
     return lifetime;
@@ -231,17 +231,11 @@ function IsLeafNodeBase(object: unknown): object is LeafNodeBase {
         IsCapabilities(object.capabilities) &&
         "leaf_node_source" in object &&
         typeof object.leaf_node_source === "number" &&
-        [
-            LeafNodeSource.key_package,
-            LeafNodeSource.update,
-            LeafNodeSource.commit
-        ].includes(object.leaf_node_source) &&
         "extensions" in object &&
-        object.extensions === undefined &&
-        (// signature either doesn't exist or is a Uint8Array
-            ("signature" in object && object.signature instanceof Uint8Array) ||
-            !("signature" in object)
-        )
+        Array.isArray(object.extensions) &&
+        object.extensions.every((e) => IsExtension(e, [ExtensionType.application_id])) &&
+        // signature either doesn't exist or is a Uint8Array
+        (("signature" in object && object.signature instanceof Uint8Array) || !("signature" in object))
     );
 }
 
@@ -250,11 +244,7 @@ function IsLeafNodeKeyPackage(object: unknown): object is LeafNodeKeyPackage {
         return false;
     }
     // leaf_node_source is LeafNodeSource.key_package
-    return (
-        object.leaf_node_source === LeafNodeSource.key_package &&
-        "lifetime" in object &&
-        IsLifeTime(object.lifetime)
-    );
+    return object.leaf_node_source === LeafNodeSource.key_package && "lifetime" in object && IsLifeTime(object.lifetime);
 }
 
 function IsLeafNodeCommit(object: unknown): object is LeafNodeCommit {
@@ -262,11 +252,7 @@ function IsLeafNodeCommit(object: unknown): object is LeafNodeCommit {
         return false;
     }
     // leaf_node_source is LeafNodeSource.commit
-    return (
-        object.leaf_node_source === LeafNodeSource.commit &&
-        "parent_hash" in object &&
-        object.parent_hash instanceof Uint8Array
-    );
+    return object.leaf_node_source === LeafNodeSource.commit && "parent_hash" in object && object.parent_hash instanceof Uint8Array;
 }
 
 function IsLeafNode(object: unknown): object is LeafNode {
@@ -282,8 +268,8 @@ function ConstructLeafNodeSignatureData(node: LeafNode, group_id?: Uint8Array, l
     encoder.writeUint8Array(EncodeCapabilities(node.capabilities), false);
     encoder.writeUint(Uint8.from(node.leaf_node_source));
     if (IsLeafNodeKeyPackage(node)) {
-        encoder.writeUint(node.lifetime.not_before);
-        encoder.writeUint(node.lifetime.not_after);
+        const lifetime = EncodeLifeTime(node.lifetime);
+        encoder.writeUint8Array(lifetime, false);
     }
     if (IsLeafNodeCommit(node)) {
         encoder.writeUint8Array(node.parent_hash);
@@ -314,7 +300,8 @@ function EncodeLeafNode(node: LeafNode) {
     encoder.writeUint8Array(EncodeCapabilities(node.capabilities), false);
     encoder.writeUint(Uint8.from(node.leaf_node_source));
     if (IsLeafNodeKeyPackage(node)) {
-        encoder.writeUint8Array(EncodeLifeTime(node.lifetime), false);
+        const lifetime = EncodeLifeTime(node.lifetime);
+        encoder.writeUint8Array(lifetime, false);
     }
     if (IsLeafNodeCommit(node)) {
         encoder.writeUint8Array(node.parent_hash);
@@ -333,10 +320,10 @@ function DecodeLeafNode(decoder: Decoder): LeafNode {
     const leaf_node_source = decoder.readUint8().value;
     let lifetime: Lifetime | undefined = undefined;
     let parent_hash: Uint8Array | undefined = undefined;
-    if(leaf_node_source === LeafNodeSource.key_package) {
+    if (leaf_node_source === LeafNodeSource.key_package) {
         lifetime = DecodeLifetime(decoder);
     }
-    if(leaf_node_source === LeafNodeSource.commit) {
+    if (leaf_node_source === LeafNodeSource.commit) {
         parent_hash = decoder.readUint8Array();
     }
     const extensionsLength = decoder.readUint16().value;
@@ -355,14 +342,61 @@ function DecodeLeafNode(decoder: Decoder): LeafNode {
         parent_hash,
         extensions,
         signature
-    }
-    if(!IsLeafNode(leaf_node)) {
+    };
+    if (!IsLeafNode(leaf_node)) {
         throw new InvalidObjectError("Invalid leaf node");
     }
     return leaf_node;
 }
 
-export { ConstructLeafNodeSignatureData, EncodeLeafNode, IsLeafNodeBase, IsLeafNodeCommit, IsLeafNodeKeyPackage, IsLeafNode, DecodeLeafNode };
+interface GenerateLeafNodeParams {
+    cipherSuite: CipherSuiteType;
+    signingKeyPriv: Uint8Array;
+    signingKeyPub: Uint8Array;
+    credential: Credential;
+    extensions: Extension<ExtensionType.application_id>[];
+    validFor?: bigint;
+}
+
+async function GenerateLeafNode(params: GenerateLeafNodeParams) {
+    const { cipherSuite, signingKeyPriv, signingKeyPub, credential, extensions, validFor } = params;
+    const leafKeyPair = await GenerateKeyPair(cipherSuite);
+    // create the leaf node
+    const currTime = GetCurrentTime();
+    const leafNode = {
+        encryption_key: leafKeyPair.publicKey,
+        capabilities: GetDefaultCapabilities(),
+        signature_key: signingKeyPub,
+        credential,
+        extensions,
+        leaf_node_source: LeafNodeSource.key_package,
+        lifetime: {
+            not_before: Uint64.from(currTime),
+            not_after: Uint64.from(currTime + (validFor ?? 86400n))
+        },
+        signature: new Uint8Array(0)
+    } satisfies LeafNodeKeyPackage;
+    const leafNodeSignatureData = ConstructLeafNodeSignatureData(leafNode);
+    const leafNodeSignature = await SignWithLabel(
+        signingKeyPriv,
+        new TextEncoder().encode("LeafNodeTBS"),
+        leafNodeSignatureData,
+        cipherSuite
+    );
+    leafNode.signature = leafNodeSignature;
+    return { node: leafNode, nodePrivateKey: leafKeyPair.privateKey };
+}
+
+export {
+    ConstructLeafNodeSignatureData,
+    DecodeLeafNode,
+    EncodeLeafNode,
+    GenerateLeafNode,
+    IsLeafNode,
+    IsLeafNodeBase,
+    IsLeafNodeCommit,
+    IsLeafNodeKeyPackage
+};
 export type { LeafNode, LeafNodeCommit, LeafNodeKeyPackage };
 
 type RatchetTreeNode = ParentNode | LeafNode;
@@ -396,7 +430,7 @@ export default class RatchetTree extends ArrayTree<RatchetTreeNode> {
             this.extend();
         }
         firstEmpty = this.firstEmptyLeaf;
-        if(!IsLeafNode(firstEmpty?.data)) {
+        if (!IsLeafNode(firstEmpty?.data)) {
             throw new Error("No empty leaves after extending???");
         }
         firstEmpty.data = leaf;

@@ -9,21 +9,21 @@ import "./mls/Group";
 const suite = new CipherSuite({
     kem: new DhkemX25519HkdfSha256(),
     kdf: new HkdfSha256(),
-    aead: new Aes256Gcm
+    aead: new Aes256Gcm()
 });
 const pk = ed.utils.randomPrivateKey();
 const edwardskp = {
     privateKey: pk,
     publicKey: await ed.getPublicKeyAsync(pk)
-}
+};
 const montgomerykp = {
     privateKey: edwardsToMontgomeryPriv(edwardskp.privateKey),
     publicKey: edwardsToMontgomeryPub(edwardskp.publicKey)
-}
+};
 const skp = {
     privateKey: await suite.kem.deserializePrivateKey(montgomerykp.privateKey.slice(0, suite.kem.privateKeySize).buffer as ArrayBuffer),
     publicKey: await suite.kem.deserializePublicKey(montgomerykp.publicKey.slice(0, suite.kem.publicKeySize).buffer as ArrayBuffer)
-}
+};
 console.log(skp);
 const rkp = await suite.kem.generateKeyPair();
 const sender = await suite.createSenderContext({
@@ -43,5 +43,5 @@ console.log(new TextDecoder().decode(pt));
 const message = Uint8Array.from([0xde, 0xad, 0xbe, 0xef]);
 const signature = await ed.signAsync(message, edwardskp.privateKey);
 console.log(signature);
-console.log(edwardskp)
-console.log(await ed.verifyAsync(signature, message, edwardskp.publicKey))
+console.log(edwardskp);
+console.log(await ed.verifyAsync(signature, message, edwardskp.publicKey));

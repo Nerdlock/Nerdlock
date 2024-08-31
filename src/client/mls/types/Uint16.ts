@@ -63,7 +63,7 @@ export default class Uint16 {
         if (!(other instanceof Uint16)) {
             throw new TypeError("Operand must be an instance of Uint16.");
         }
-        this.value = (this.value & other.value) & 0xffff;
+        this.value = this.value & other.value & 0xffff;
         return this;
     }
 

@@ -87,11 +87,7 @@ function IsPrivateMessageContentCommit(object: unknown): object is PrivateMessag
 }
 
 function IsPrivateMessageContent(object: unknown): object is PrivateMessageContent {
-    return (
-        IsPrivateMessageContentApplication(object) ||
-        IsPrivateMessageContentProposal(object) ||
-        IsPrivateMessageContentCommit(object)
-    );
+    return IsPrivateMessageContentApplication(object) || IsPrivateMessageContentProposal(object) || IsPrivateMessageContentCommit(object);
 }
 
 export type { PrivateMessageContent };

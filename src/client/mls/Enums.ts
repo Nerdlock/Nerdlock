@@ -14,7 +14,7 @@ enum LeafNodeSource {
 enum CredentialType {
     RESERVED = 0x0000,
     basic = 0x0001,
-    x509 = 0x0002,
+    x509 = 0x0002
 }
 
 /**
@@ -26,7 +26,7 @@ enum ExtensionType {
     ratchet_tree = 0x0002,
     required_capabilities = 0x0003,
     external_pub = 0x0004,
-    external_senders = 0x0005,
+    external_senders = 0x0005
 }
 
 /**
@@ -81,7 +81,7 @@ enum CipherSuiteType {
     MLS_256_DHKEMX448_AES256GCM_SHA512_Ed448 = 0x0004,
     MLS_256_DHKEMP521_AES256GCM_SHA512_P521 = 0x0005,
     MLS_256_DHKEMX448_CHACHA20POLY1305_SHA512_Ed448 = 0x0006,
-    MLS_256_DHKEMP384_AES256GCM_SHA384_P384 = 0x0007,
+    MLS_256_DHKEMP384_AES256GCM_SHA384_P384 = 0x0007
 }
 
 /**
@@ -95,7 +95,7 @@ enum ProposalType {
     psk = 0x0004,
     reinit = 0x0005,
     external_init = 0x0006,
-    group_context_extension = 0x0007,
+    group_context_extension = 0x0007
 }
 
 enum ProposalOrRefType {
@@ -104,4 +104,15 @@ enum ProposalOrRefType {
     reference = 2
 }
 
-export { ProtocolVersion, ContentType, SenderType, WireFormat, CipherSuiteType, ProposalType, ProposalOrRefType, ExtensionType, LeafNodeSource, CredentialType };
+export {
+    ProtocolVersion,
+    ContentType,
+    SenderType,
+    WireFormat,
+    CipherSuiteType,
+    ProposalType,
+    ProposalOrRefType,
+    ExtensionType,
+    LeafNodeSource,
+    CredentialType
+};

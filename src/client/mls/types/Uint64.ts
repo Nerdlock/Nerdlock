@@ -192,14 +192,14 @@ export default class Uint64 {
      */
     encode() {
         const buffer = new Uint8Array(8);
-        buffer[0] = (this.high >>> 24) & 0xFF;
-        buffer[1] = (this.high >>> 16) & 0xFF;
-        buffer[2] = (this.high >>> 8) & 0xFF;
-        buffer[3] = this.high & 0xFF;
-        buffer[4] = (this.low >>> 24) & 0xFF;
-        buffer[5] = (this.low >>> 16) & 0xFF;
-        buffer[6] = (this.low >>> 8) & 0xFF;
-        buffer[7] = this.low & 0xFF;
+        buffer[0] = (this.high >>> 24) & 0xff;
+        buffer[1] = (this.high >>> 16) & 0xff;
+        buffer[2] = (this.high >>> 8) & 0xff;
+        buffer[3] = this.high & 0xff;
+        buffer[4] = (this.low >>> 24) & 0xff;
+        buffer[5] = (this.low >>> 16) & 0xff;
+        buffer[6] = (this.low >>> 8) & 0xff;
+        buffer[7] = this.low & 0xff;
         return buffer;
     }
 
@@ -210,18 +210,10 @@ export default class Uint64 {
      */
     static decode(buffer: Uint8Array) {
         if (buffer.length !== 8) {
-            throw new Error('Uint8Array must be 8 bytes long');
+            throw new Error("Uint8Array must be 8 bytes long");
         }
-        const high =
-            (buffer[0] << 24) |
-            (buffer[1] << 16) |
-            (buffer[2] << 8) |
-            buffer[3];
-        const low =
-            (buffer[4] << 24) |
-            (buffer[5] << 16) |
-            (buffer[6] << 8) |
-            buffer[7];
+        const high = (buffer[0] << 24) | (buffer[1] << 16) | (buffer[2] << 8) | buffer[3];
+        const low = (buffer[4] << 24) | (buffer[5] << 16) | (buffer[6] << 8) | buffer[7];
         return new Uint64(high >>> 0, low >>> 0); // Treat as unsigned
     }
 

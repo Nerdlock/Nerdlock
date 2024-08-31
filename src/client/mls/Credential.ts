@@ -41,10 +41,7 @@ function IsCredentialBase(object: unknown): object is CredentialBase {
         object !== null &&
         "credential_type" in object &&
         typeof object.credential_type === "number" &&
-        [
-            CredentialType.basic,
-            CredentialType.x509
-        ].includes(object.credential_type)
+        [CredentialType.basic, CredentialType.x509].includes(object.credential_type)
     );
 }
 
@@ -107,7 +104,7 @@ function DecodeCredential(decoder: Decoder): Credential {
         const length = decoder.readUint8().value;
         for (let i = 0; i < length; i++) {
             credentials.push({
-                cert_data: decoder.readUint8Array(),
+                cert_data: decoder.readUint8Array()
             } satisfies Certificate);
         }
         return {

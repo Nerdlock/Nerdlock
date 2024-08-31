@@ -1,8 +1,10 @@
+import type { Credential } from "../Credential";
+import { GenerateKeyPair, SignWithLabel } from "../CryptoHelper";
 import { Decoder, Encoder } from "../Encoding";
-import type { CipherSuiteType, ExtensionType, ProtocolVersion } from "../Enums";
+import { ProtocolVersion, type CipherSuiteType, type ExtensionType } from "../Enums";
 import InvalidObjectError from "../errors/InvalidObjectError";
 import { DecodeExtension, EncodeExtension, type Extension } from "../Extension";
-import { DecodeLeafNode, EncodeLeafNode, IsLeafNodeKeyPackage, type LeafNodeKeyPackage } from "../RatchetTree";
+import { DecodeLeafNode, EncodeLeafNode, GenerateLeafNode, IsLeafNodeKeyPackage, type LeafNodeKeyPackage } from "../RatchetTree";
 import Uint16 from "../types/Uint16";
 
 interface KeyPackage {
@@ -49,7 +51,7 @@ function EncodeKeyPackage(keyPackage: KeyPackage) {
     encoder.writeUint(Uint16.from(keyPackage.version));
     encoder.writeUint(Uint16.from(keyPackage.cipher_suite));
     encoder.writeUint8Array(keyPackage.init_key);
-    encoder.writeUint8Array(EncodeLeafNode(keyPackage.leaf_node));
+    encoder.writeUint8Array(EncodeLeafNode(keyPackage.leaf_node), false);
     encoder.writeUint(Uint16.from(keyPackage.extensions.length));
     keyPackage.extensions.forEach((e) => encoder.writeUint8Array(EncodeExtension(e), false));
     encoder.writeUint8Array(keyPackage.signature);
@@ -74,12 +76,48 @@ function DecodeKeyPackage(decoder: Decoder): KeyPackage {
         leaf_node,
         extensions,
         signature
-    }
-    if(!IsKeyPackage(keyPackage)) {
+    };
+    if (!IsKeyPackage(keyPackage)) {
         throw new InvalidObjectError("Invalid key package");
     }
     return keyPackage;
 }
 
+interface GenerateKeyPackageParams {
+    cipherSuite: CipherSuiteType;
+    signingKeyPriv: Uint8Array;
+    signingKeyPub: Uint8Array;
+    credential: Credential;
+    extensions: Extension<ExtensionType.application_id>[];
+    validFor?: bigint;
+    version?: ProtocolVersion;
+}
+async function GenerateKeyPackage(
+    params: GenerateKeyPackageParams
+): Promise<{ keyPackage: KeyPackage; initKeyPrivate: Uint8Array; leafNodePrivate: Uint8Array }> {
+    const { cipherSuite, signingKeyPriv, signingKeyPub, credential, extensions, validFor } = params;
+    const initKeyPair = await GenerateKeyPair(cipherSuite);
+    // create the leaf node
+    const leafNode = await GenerateLeafNode({ cipherSuite, signingKeyPriv, signingKeyPub, credential, extensions, validFor });
+    // create the key package
+    const keyPackage = {
+        version: params.version ?? ProtocolVersion.mls10,
+        cipher_suite: cipherSuite,
+        init_key: initKeyPair.publicKey,
+        leaf_node: leafNode.node,
+        extensions,
+        signature: new Uint8Array(0)
+    } satisfies KeyPackage;
+    const keyPackageSignatureData = ConstructKeyPackageSignatureData(keyPackage);
+    const keyPackageSignature = await SignWithLabel(
+        signingKeyPriv,
+        new TextEncoder().encode("KeyPackageTBS"),
+        keyPackageSignatureData,
+        cipherSuite
+    );
+    keyPackage.signature = keyPackageSignature;
+    return { keyPackage, initKeyPrivate: initKeyPair.privateKey, leafNodePrivate: leafNode.nodePrivateKey };
+}
+
+export { ConstructKeyPackageSignatureData, DecodeKeyPackage, EncodeKeyPackage, IsKeyPackage, GenerateKeyPackage };
 export type { KeyPackage };
-export { IsKeyPackage, ConstructKeyPackageSignatureData, EncodeKeyPackage, DecodeKeyPackage };

@@ -16,7 +16,6 @@ interface ProposalOrRefReference extends ProposalOrRefBase {
     reference: Uint32;
 }
 
-
-type Commit = {}
+type Commit = {};
 
 export type { Commit };

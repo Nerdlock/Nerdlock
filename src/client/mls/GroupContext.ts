@@ -34,7 +34,9 @@ function IsGroupContext(object: unknown): object is GroupContext {
         object.tree_hash instanceof Uint8Array &&
         object.confirmed_transcript_hash instanceof Uint8Array &&
         object.extensions instanceof Array &&
-        object.extensions.every((e) => IsExtension(e, ExtensionType.required_capabilities) || IsExtension(e, ExtensionType.external_senders))
+        object.extensions.every(
+            (e) => IsExtension(e, ExtensionType.required_capabilities) || IsExtension(e, ExtensionType.external_senders)
+        )
     );
 }
 
@@ -60,7 +62,7 @@ function DecodeGroupContext(decoder: Decoder) {
         tree_hash: decoder.readUint8Array(),
         confirmed_transcript_hash: decoder.readUint8Array(),
         extensions: undefined
-    }
+    };
     if (!IsGroupContext(context)) {
         throw new MalformedObjectError("Invalid group context", "context", context);
     }

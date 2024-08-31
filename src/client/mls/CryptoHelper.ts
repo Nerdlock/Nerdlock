@@ -4,7 +4,20 @@ import { secp384r1 } from "@noble/curves/p384";
 import { secp521r1 } from "@noble/curves/p521";
 import { ed448, x448 } from "@noble/curves/ed448";
 import { sha384, sha512 } from "@noble/hashes/sha512";
-import { Aes128Gcm, Aes256Gcm, CipherSuite, DhkemP256HkdfSha256, DhkemP384HkdfSha384, DhkemP521HkdfSha512, HkdfSha256, HkdfSha384, HkdfSha512, type AeadInterface, type KdfInterface, type KemInterface } from "@hpke/core";
+import {
+    Aes128Gcm,
+    Aes256Gcm,
+    CipherSuite,
+    DhkemP256HkdfSha256,
+    DhkemP384HkdfSha384,
+    DhkemP521HkdfSha512,
+    HkdfSha256,
+    HkdfSha384,
+    HkdfSha512,
+    type AeadInterface,
+    type KdfInterface,
+    type KemInterface
+} from "@hpke/core";
 import { Chacha20Poly1305 } from "@hpke/chacha20poly1305";
 import { DhkemX448HkdfSha512 } from "@hpke/dhkem-x448";
 import { DhkemX25519HkdfSha256 } from "@hpke/dhkem-x25519";
@@ -15,25 +28,27 @@ import { x25519 } from "@noble/curves/ed25519";
 import { hmac } from "@noble/hashes/hmac";
 
 // required polyfills
-ed25519.etc.sha512Sync = (...m) => sha512(ed25519.etc.concatBytes(...m))
+ed25519.etc.sha512Sync = (...m) => sha512(ed25519.etc.concatBytes(...m));
 
 interface CryptoImplementation {
     signAsync(key: Uint8Array, message: Uint8Array): Promise<Uint8Array>;
     verifyAsync(key: Uint8Array, message: Uint8Array, signature: Uint8Array): Promise<boolean>;
-    generateKeyPair(): Promise<{ privateKey: Uint8Array, publicKey: Uint8Array }>;
-    generateSigningKeyPair(): Promise<{ privateKey: Uint8Array, publicKey: Uint8Array }>;
+    generateKeyPair(): Promise<{ privateKey: Uint8Array; publicKey: Uint8Array }>;
+    generateSigningKeyPair(): Promise<{ privateKey: Uint8Array; publicKey: Uint8Array }>;
 }
 
-function GenerateKeyPairInternal(curve: typeof x25519 | typeof ed25519 | typeof secp256r1 | typeof secp384r1 | typeof secp521r1 | typeof ed448 | typeof x448) {
+function GenerateKeyPairInternal(
+    curve: typeof x25519 | typeof ed25519 | typeof secp256r1 | typeof secp384r1 | typeof secp521r1 | typeof ed448 | typeof x448
+) {
     const pk = curve.utils.randomPrivateKey();
     return {
         privateKey: pk,
         publicKey: curve.getPublicKey(pk)
-    }
+    };
 }
 
-const CryptoImplementations = <const>{
-    "ed25519": {
+const CryptoImplementations = (<const>{
+    ed25519: {
         async signAsync(key, message) {
             return ed25519.sign(message, key);
         },
@@ -47,7 +62,7 @@ const CryptoImplementations = <const>{
             return GenerateKeyPairInternal(ed25519);
         }
     },
-    "ed448": {
+    ed448: {
         async signAsync(key, message) {
             return ed448.sign(message, key);
         },
@@ -59,9 +74,9 @@ const CryptoImplementations = <const>{
         },
         async generateSigningKeyPair() {
             return GenerateKeyPairInternal(ed448);
-        },
+        }
     },
-    "secp256r1": {
+    secp256r1: {
         async signAsync(key, message) {
             return secp256r1.sign(message, key).toCompactRawBytes();
         },
@@ -75,7 +90,7 @@ const CryptoImplementations = <const>{
             return GenerateKeyPairInternal(secp256r1);
         }
     },
-    "secp384r1": {
+    secp384r1: {
         async signAsync(key, message) {
             return secp384r1.sign(message, key).toCompactRawBytes();
         },
@@ -87,9 +102,9 @@ const CryptoImplementations = <const>{
         },
         async generateSigningKeyPair() {
             return GenerateKeyPairInternal(secp384r1);
-        },
+        }
     },
-    "secp521r1": {
+    secp521r1: {
         async signAsync(key, message) {
             return secp521r1.sign(message, key).toCompactRawBytes();
         },
@@ -101,9 +116,9 @@ const CryptoImplementations = <const>{
         },
         async generateSigningKeyPair() {
             return GenerateKeyPairInternal(secp521r1);
-        },
-    },
-} satisfies Record<string, CryptoImplementation>;
+        }
+    }
+}) satisfies Record<string, CryptoImplementation>;
 
 function GetCryptoImpl(cipherSuite: CipherSuiteType): CryptoImplementation {
     switch (cipherSuite) {
@@ -142,7 +157,7 @@ function GetHashFunction(cipherSuite: CipherSuiteType): typeof sha256 | typeof s
 }
 
 function DecodeCipherSuiteType(value: number): CipherSuite {
-    if (value <= 0x0000 || value > 0xFFFF) {
+    if (value <= 0x0000 || value > 0xffff) {
         throw new RangeError("Invalid cipher suite type");
     }
     let kem: KemInterface | undefined = undefined;
@@ -211,7 +226,7 @@ function DecodeCipherSuiteType(value: number): CipherSuite {
         kem,
         kdf,
         aead
-    })
+    });
     return ciphersuite;
 }
 
@@ -224,7 +239,7 @@ function GetAllCipherSuites() {
         CipherSuiteType.MLS_256_DHKEMP521_AES256GCM_SHA512_P521,
         CipherSuiteType.MLS_256_DHKEMX448_AES256GCM_SHA512_Ed448,
         CipherSuiteType.MLS_256_DHKEMX448_CHACHA20POLY1305_SHA512_Ed448
-    ]
+    ];
 }
 
 const labelHeader = new TextEncoder().encode("MLS 1.0 ");
@@ -255,34 +270,57 @@ function GenerateSigningKeyPair(cipherSuite: CipherSuiteType) {
     return GetCryptoImpl(cipherSuite).generateSigningKeyPair();
 }
 
-async function EncryptWithLabel(key: Uint8Array, label: Uint8Array, context: Uint8Array, plaintext: Uint8Array, cipherSuite: CipherSuiteType) {
+async function EncryptWithLabel(
+    key: Uint8Array,
+    label: Uint8Array,
+    context: Uint8Array,
+    plaintext: Uint8Array,
+    cipherSuite: CipherSuiteType
+) {
     const suite = DecodeCipherSuiteType(cipherSuite);
     const finalContext = new Uint8Array(labelHeader.length + label.length + context.length);
     finalContext.set(labelHeader);
     finalContext.set(label, labelHeader.length);
     finalContext.set(context, labelHeader.length + label.length);
-    return suite.seal({
-        recipientPublicKey: await suite.kem.deserializePublicKey(key.buffer as ArrayBuffer),
-        info: finalContext.buffer as ArrayBuffer
-    }, plaintext.buffer as ArrayBuffer).then(r => {
-        return {
-            ciphertext: new Uint8Array(r.ct),
-            encKey: new Uint8Array(r.enc),
-        }
-    });
+    return suite
+        .seal(
+            {
+                recipientPublicKey: await suite.kem.deserializePublicKey(key.buffer as ArrayBuffer),
+                info: finalContext.buffer as ArrayBuffer
+            },
+            plaintext.buffer as ArrayBuffer
+        )
+        .then((r) => {
+            return {
+                ciphertext: new Uint8Array(r.ct),
+                encKey: new Uint8Array(r.enc)
+            };
+        });
 }
 
-async function DecryptWithLabel(key: Uint8Array, encKey: Uint8Array, label: Uint8Array, context: Uint8Array, ciphertext: Uint8Array, cipherSuite: CipherSuiteType) {
+async function DecryptWithLabel(
+    key: Uint8Array,
+    encKey: Uint8Array,
+    label: Uint8Array,
+    context: Uint8Array,
+    ciphertext: Uint8Array,
+    cipherSuite: CipherSuiteType
+) {
     const suite = DecodeCipherSuiteType(cipherSuite);
     const finalContext = new Uint8Array(labelHeader.length + label.length + context.length);
     finalContext.set(labelHeader);
     finalContext.set(label, labelHeader.length);
     finalContext.set(context, labelHeader.length + label.length);
-    return suite.open({
-        recipientKey: await suite.kem.deserializePublicKey(key.buffer as ArrayBuffer),
-        info: finalContext.buffer as ArrayBuffer,
-        enc: encKey.buffer as ArrayBuffer
-    }, ciphertext.buffer as ArrayBuffer).then(r => new Uint8Array(r));
+    return suite
+        .open(
+            {
+                recipientKey: await suite.kem.deserializePublicKey(key.buffer as ArrayBuffer),
+                info: finalContext.buffer as ArrayBuffer,
+                enc: encKey.buffer as ArrayBuffer
+            },
+            ciphertext.buffer as ArrayBuffer
+        )
+        .then((r) => new Uint8Array(r));
 }
 
 async function ExpandWithLabel(secret: Uint8Array, label: Uint8Array, context: Uint8Array, length: Uint16, cipherSuite: CipherSuiteType) {
@@ -309,7 +347,7 @@ function DeriveSecret(secret: Uint8Array, label: Uint8Array, cipherSuite: Cipher
 
 async function Hash(message: Uint8Array, cipherSuite: CipherSuiteType) {
     const hashFunction = GetHashFunction(cipherSuite);
-    return hashFunction(message)
+    return hashFunction(message);
 }
 
 function ArraysEqual(a: Uint8Array, b: Uint8Array) {
@@ -325,7 +363,7 @@ function ArraysEqual(a: Uint8Array, b: Uint8Array) {
 }
 
 function GetCurrentTime() {
-    return BigInt(Math.floor(Date.now() / 1000))
+    return BigInt(Math.floor(Date.now() / 1000));
 }
 
 async function MAC(key: Uint8Array, data: Uint8Array, cipherSuite: CipherSuiteType) {
@@ -333,4 +371,20 @@ async function MAC(key: Uint8Array, data: Uint8Array, cipherSuite: CipherSuiteTy
     return hmac.create(hashFunction, key).update(data).digest();
 }
 
-export { SignWithLabel, VerifyWithLabel, GenerateKeyPair, DecodeCipherSuiteType, EncryptWithLabel, DecryptWithLabel, ExpandWithLabel, DeriveSecret, Hash, Extract, ArraysEqual, GetAllCipherSuites, GetCurrentTime, GenerateSigningKeyPair, MAC };
+export {
+    SignWithLabel,
+    VerifyWithLabel,
+    GenerateKeyPair,
+    DecodeCipherSuiteType,
+    EncryptWithLabel,
+    DecryptWithLabel,
+    ExpandWithLabel,
+    DeriveSecret,
+    Hash,
+    Extract,
+    ArraysEqual,
+    GetAllCipherSuites,
+    GetCurrentTime,
+    GenerateSigningKeyPair,
+    MAC
+};

@@ -13,11 +13,7 @@ function IsUpdateProposal(object: unknown): object is UpdateProposal {
     if (!IsProposalBase(object)) {
         return false;
     }
-    return (
-        object.proposal_type === ProposalType.update &&
-        "leaf_node" in object &&
-        object.leaf_node !== null
-    );
+    return object.proposal_type === ProposalType.update && "leaf_node" in object && object.leaf_node !== null;
 }
 
 function DecodeUpdateProposal(base: ProposalBase, decoder: Decoder): UpdateProposal {
@@ -25,8 +21,8 @@ function DecodeUpdateProposal(base: ProposalBase, decoder: Decoder): UpdatePropo
     const proposal = {
         proposal_type: base.proposal_type,
         leaf_node
-    }
-    if(!IsUpdateProposal(proposal)) {
+    };
+    if (!IsUpdateProposal(proposal)) {
         throw new InvalidObjectError("Invalid update proposal");
     }
     return proposal;

@@ -39,12 +39,7 @@ interface SenderNewMemberCommit extends SenderBase {
 type Sender = SenderMember | SenderExternal | SenderNewMemberProposal | SenderNewMemberCommit;
 
 function IsSenderBase(object: unknown): object is SenderBase {
-    return (
-        typeof object === "object" &&
-        object !== null &&
-        "sender_type" in object &&
-        typeof object.sender_type === "number"
-    )
+    return typeof object === "object" && object !== null && "sender_type" in object && typeof object.sender_type === "number";
 }
 
 function IsSenderMember(object: unknown): object is SenderMember {
@@ -52,11 +47,7 @@ function IsSenderMember(object: unknown): object is SenderMember {
         return false;
     }
     // sender_type is SenderType.member
-    return (
-        object.sender_type === SenderType.member &&
-        "leaf_index" in object &&
-        object.leaf_index instanceof Uint32
-    );
+    return object.sender_type === SenderType.member && "leaf_index" in object && object.leaf_index instanceof Uint32;
 }
 
 function IsSenderExternal(object: unknown): object is SenderExternal {
@@ -64,11 +55,7 @@ function IsSenderExternal(object: unknown): object is SenderExternal {
         return false;
     }
     // sender_type is SenderType.external
-    return (
-        object.sender_type === SenderType.external &&
-        "sender_index" in object &&
-        object.sender_index instanceof Uint32
-    );
+    return object.sender_type === SenderType.external && "sender_index" in object && object.sender_index instanceof Uint32;
 }
 
 function IsSenderNewMemberProposal(object: unknown): object is SenderNewMemberProposal {
@@ -76,9 +63,7 @@ function IsSenderNewMemberProposal(object: unknown): object is SenderNewMemberPr
         return false;
     }
     // sender_type is SenderType.new_member_proposal
-    return (
-        object.sender_type === SenderType.new_member_proposal
-    );
+    return object.sender_type === SenderType.new_member_proposal;
 }
 
 function IsSenderNewMemberCommit(object: unknown): object is SenderNewMemberCommit {
@@ -86,18 +71,11 @@ function IsSenderNewMemberCommit(object: unknown): object is SenderNewMemberComm
         return false;
     }
     // sender_type is SenderType.new_member_commit
-    return (
-        object.sender_type === SenderType.new_member_commit
-    );
+    return object.sender_type === SenderType.new_member_commit;
 }
 
 function IsSender(object: unknown): object is Sender {
-    return (
-        IsSenderMember(object) ||
-        IsSenderExternal(object) ||
-        IsSenderNewMemberProposal(object) ||
-        IsSenderNewMemberCommit(object)
-    );
+    return IsSenderMember(object) || IsSenderExternal(object) || IsSenderNewMemberProposal(object) || IsSenderNewMemberCommit(object);
 }
 
 function EncodeSender(sender: Sender): Uint8Array {
@@ -137,7 +115,16 @@ function DecodeSender(decoder: Decoder): Sender {
     } satisfies Sender;
 }
 
-export { DecodeSender, EncodeSender, IsSender, IsSenderBase, IsSenderExternal, IsSenderMember, IsSenderNewMemberCommit, IsSenderNewMemberProposal };
+export {
+    DecodeSender,
+    EncodeSender,
+    IsSender,
+    IsSenderBase,
+    IsSenderExternal,
+    IsSenderMember,
+    IsSenderNewMemberCommit,
+    IsSenderNewMemberProposal
+};
 export type { Sender };
 
 interface FramedContentBase {
@@ -187,11 +174,7 @@ function IsFramedContentApplication(object: unknown): object is FramedContentApp
         return false;
     }
     // content_type is ContentType.application
-    return (
-        object.content_type === ContentType.application &&
-        "application_data" in object &&
-        object.application_data instanceof Uint8Array
-    );
+    return object.content_type === ContentType.application && "application_data" in object && object.application_data instanceof Uint8Array;
 }
 
 function IsFramedContentProposal(object: unknown): object is FramedContentProposal {
@@ -200,11 +183,7 @@ function IsFramedContentProposal(object: unknown): object is FramedContentPropos
     }
     // content_type is ContentType.proposal
     // proposal is Proposal
-    return (
-        object.content_type === ContentType.proposal &&
-        "proposal" in object &&
-        IsProposal(object.proposal)
-    );
+    return object.content_type === ContentType.proposal && "proposal" in object && IsProposal(object.proposal);
 }
 
 function IsFramedContentCommit(object: unknown): object is FramedContentCommit {
@@ -214,18 +193,13 @@ function IsFramedContentCommit(object: unknown): object is FramedContentCommit {
     // content_type is ContentType.commit
     // commit is Commit
     return (
-        object.content_type === ContentType.commit &&
-        "commit" in object //&&
+        object.content_type === ContentType.commit && "commit" in object //&&
         //IsCommit(object.commit)
     );
 }
 
 function IsFramedContent(object: unknown): object is FramedContent {
-    return (
-        IsFramedContentApplication(object) ||
-        IsFramedContentProposal(object) ||
-        IsFramedContentCommit(object)
-    );
+    return IsFramedContentApplication(object) || IsFramedContentProposal(object) || IsFramedContentCommit(object);
 }
 
 /**
@@ -239,7 +213,7 @@ function EncodeFramedContent(content: FramedContent) {
     encoder.writeUint(content.epoch);
     encoder.writeUint8Array(EncodeSender(content.sender), false);
     encoder.writeUint(Uint8.from(content.content_type));
-    encoder.writeUint8Array(content.authenticated_data)
+    encoder.writeUint8Array(content.authenticated_data);
     if (IsFramedContentApplication(content)) {
         encoder.writeUint8Array(content.application_data);
     }
@@ -254,7 +228,12 @@ function EncodeFramedContent(content: FramedContent) {
  * @param context The GroupContext to encode, if needed.
  * @returns The raw bytes of an encoded FramedContentTBS structure, ready to be used for signing/verification.
  */
-function ConstructFramedContentSignatureData(version: ProtocolVersion, wireFormat: WireFormat, content: FramedContent, context: GroupContext) {
+function ConstructFramedContentSignatureData(
+    version: ProtocolVersion,
+    wireFormat: WireFormat,
+    content: FramedContent,
+    context: GroupContext
+) {
     const encoder = new Encoder();
     encoder.writeUint(Uint16.from(version));
     encoder.writeUint(Uint16.from(wireFormat));
@@ -282,27 +261,18 @@ interface FramedContentAuthDataCommit extends FramedContentAuthDataBase {
 type FramedContentAuthData = FramedContentAuthDataCommit | FramedContentAuthDataBase;
 
 function IsFramedContentAuthDataBase(object: unknown): object is FramedContentAuthDataBase {
-    return (
-        typeof object === "object" &&
-        object !== null &&
-        "signature" in object &&
-        object.signature instanceof Uint8Array
-    )
-};
+    return typeof object === "object" && object !== null && "signature" in object && object.signature instanceof Uint8Array;
+}
 
 function IsFramedContentAuthDataCommit(object: unknown, contentType: ContentType): object is FramedContentAuthDataCommit {
     if (!IsFramedContentAuthDataBase(object)) {
         return false;
     }
-    return (
-        contentType === ContentType.commit &&
-        "confirmation_tag" in object &&
-        object.confirmation_tag instanceof Uint8Array
-    );
+    return contentType === ContentType.commit && "confirmation_tag" in object && object.confirmation_tag instanceof Uint8Array;
 }
 
 function IsFramedContentAuthData(object: unknown, contentType: ContentType): object is FramedContentAuthData {
-    return (IsFramedContentAuthDataBase(object) || IsFramedContentAuthDataCommit(object, contentType));
+    return IsFramedContentAuthDataBase(object) || IsFramedContentAuthDataCommit(object, contentType);
 }
 
 function EncodeFramedContentAuthData(auth: FramedContentAuthData, contentType: ContentType) {
@@ -426,12 +396,7 @@ function IsMLSMessageWelcome(object: unknown): object is MLSMessageWelcome {
     }
     // wire_format is WireFormat.mls_welcome
     // welcome is Welcome
-    return (
-        "wire_format" in object &&
-        object.wire_format === WireFormat.mls_welcome &&
-        "welcome" in object &&
-        IsWelcome(object.welcome)
-    );
+    return "wire_format" in object && object.wire_format === WireFormat.mls_welcome && "welcome" in object && IsWelcome(object.welcome);
 }
 
 function IsMLSMessageGroupInfo(object: unknown): object is MLSMessageGroupInfo {
@@ -473,4 +438,3 @@ function IsMLSMessage(object: unknown): object is MLSMessage {
 
 export { IsMLSMessage, IsMLSMessageGroupInfo, IsMLSMessageKeyPackage, IsMLSMessagePrivate, IsMLSMessagePublic, IsMLSMessageWelcome };
 export type { MLSMessage };
-

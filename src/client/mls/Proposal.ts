@@ -9,16 +9,11 @@ import { EncodeLeafNode } from "./RatchetTree";
 import Uint16 from "./types/Uint16";
 
 interface ProposalBase {
-    proposal_type: ProposalType
+    proposal_type: ProposalType;
 }
 
 function IsProposalBase(object: unknown): object is ProposalBase {
-    return (
-        typeof object === "object" &&
-        object !== null &&
-        "proposal_type" in object &&
-        typeof object.proposal_type === "number"
-    );
+    return typeof object === "object" && object !== null && "proposal_type" in object && typeof object.proposal_type === "number";
 }
 
 type Proposal = AddProposal | UpdateProposal | RemoveProposal;
@@ -32,7 +27,7 @@ function EncodeProposal(proposal: Proposal) {
             break;
         case ProposalType.update:
             encoder.writeUint8Array(EncodeLeafNode(proposal.leaf_node), false);
-            break
+            break;
         case ProposalType.remove:
             encoder.writeUint(proposal.removed);
             break;
@@ -63,5 +58,5 @@ function IsProposal(object: unknown): object is Proposal {
     return IsAddProposal(object) || IsUpdateProposal(object) || IsRemoveProposal(object);
 }
 
+export { DecodeProposal, EncodeProposal, IsProposal, IsProposalBase };
 export type { Proposal, ProposalBase };
-export { IsProposalBase, EncodeProposal, DecodeProposal, IsProposal };

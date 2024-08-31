@@ -63,7 +63,7 @@ export default class Uint8 {
         if (!(other instanceof Uint8)) {
             throw new TypeError("Operand must be an instance of Uint8.");
         }
-        this.value = (this.value & other.value) & 0xff;
+        this.value = this.value & other.value & 0xff;
         return this;
     }
 

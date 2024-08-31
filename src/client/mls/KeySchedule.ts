@@ -2,7 +2,15 @@ import { concatBytes } from "@noble/hashes/utils";
 import { DeriveSecret, Hash } from "./CryptoHelper";
 import type { CipherSuiteType } from "./Enums";
 
-type EpochSecretType = "sender_data_secret" | "encryption_secret" | "exporter_secret" | "external_secret" | "confirmation_key" | "membership_key" | "resumption_psk" | "epoch_authenticator";
+type EpochSecretType =
+    | "sender_data_secret"
+    | "encryption_secret"
+    | "exporter_secret"
+    | "external_secret"
+    | "confirmation_key"
+    | "membership_key"
+    | "resumption_psk"
+    | "epoch_authenticator";
 
 /**
  * A class for managing the key schedule of epoches.
@@ -24,12 +32,12 @@ export default class KeySchedule {
             confirmation_key: undefined,
             membership_key: undefined,
             resumption_psk: undefined,
-            epoch_authenticator: undefined,
-        }
+            epoch_authenticator: undefined
+        };
     }
 
     async #computeEpochSecret() {
-        if(this.#epochSecret == null) {
+        if (this.#epochSecret == null) {
             throw new Error("Epoch secret not set");
         }
         const encoder = new TextEncoder();
@@ -41,8 +49,8 @@ export default class KeySchedule {
             DeriveSecret(this.#epochSecret, encoder.encode("confirm"), this.#cipherSuite),
             DeriveSecret(this.#epochSecret, encoder.encode("membership"), this.#cipherSuite),
             DeriveSecret(this.#epochSecret, encoder.encode("resumption"), this.#cipherSuite),
-            DeriveSecret(this.#epochSecret, encoder.encode("authentication"), this.#cipherSuite),
-        ]).then(secrets => {
+            DeriveSecret(this.#epochSecret, encoder.encode("authentication"), this.#cipherSuite)
+        ]).then((secrets) => {
             this.#secrets = {
                 sender_data_secret: secrets[0],
                 encryption_secret: secrets[1],
@@ -51,8 +59,8 @@ export default class KeySchedule {
                 confirmation_key: secrets[4],
                 membership_key: secrets[5],
                 resumption_psk: secrets[6],
-                epoch_authenticator: secrets[7],
-            }
+                epoch_authenticator: secrets[7]
+            };
         });
         // delete the epoch secret
         this.#epochSecret = undefined;
@@ -69,7 +77,7 @@ export default class KeySchedule {
     }
 
     async computeInterimTranscriptHash(confirmed_transcript_hash: Uint8Array, confirmation_tag: Uint8Array) {
-        this.#interim_transcript_hash = await(Hash(concatBytes(confirmed_transcript_hash, confirmation_tag), this.#cipherSuite));
+        this.#interim_transcript_hash = await Hash(concatBytes(confirmed_transcript_hash, confirmation_tag), this.#cipherSuite);
     }
 
     get interim_transcript_hash() {

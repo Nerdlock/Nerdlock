@@ -39,7 +39,7 @@ type IndexedType<T> = {
 
 type IndexedTypeWithData<T> = IndexedType<T> & { data: T };
 
-export type { IndexedType }
+export type { IndexedType };
 
 /**
  * A binary-tree structure implemented as an array-based tree for the MLS ratchet tree.

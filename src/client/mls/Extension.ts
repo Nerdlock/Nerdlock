@@ -43,8 +43,8 @@ function IsExtensionData<T extends ExtensionType>(object: unknown, extensionType
     return false;
 }
 
-function IsExtension<T extends ExtensionType>(object: unknown, extensionType: T): object is Extension<T> {
-    const validObject = (
+function IsExtensionBase(object: unknown): object is Extension<ExtensionType> {
+    return (
         typeof object === "object" &&
         object !== null &&
         "extension_type" in object &&
@@ -53,10 +53,13 @@ function IsExtension<T extends ExtensionType>(object: unknown, extensionType: T)
         typeof object.extension_data === "object" &&
         object.extension_data !== null
     );
-    if (!validObject) {
+}
+
+function IsExtension<T extends ExtensionType[]>(object: unknown, extensionTypes: T): object is Extension<T[number]> {
+    if (!IsExtensionBase(object)) {
         return false;
     }
-    if (IsRequiredCapabilities(object.extension_data) && extensionType === ExtensionType.required_capabilities) {
+    if (IsRequiredCapabilities(object.extension_data) && extensionTypes.includes(ExtensionType.required_capabilities)) {
         return true;
     }
     return false;

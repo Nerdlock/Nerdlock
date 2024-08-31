@@ -13,11 +13,7 @@ function IsAddProposal(object: unknown): object is AddProposal {
     if (!IsProposalBase(object)) {
         return false;
     }
-    return (
-        object.proposal_type === ProposalType.add &&
-        "key_package" in object &&
-        IsKeyPackage(object.key_package)
-    );
+    return object.proposal_type === ProposalType.add && "key_package" in object && IsKeyPackage(object.key_package);
 }
 
 function DecodeAddProposal(base: ProposalBase, decoder: Decoder): AddProposal {
@@ -25,8 +21,8 @@ function DecodeAddProposal(base: ProposalBase, decoder: Decoder): AddProposal {
     const proposal = {
         proposal_type: base.proposal_type,
         key_package
-    }
-    if(!IsAddProposal(proposal)) {
+    };
+    if (!IsAddProposal(proposal)) {
         throw new InvalidObjectError("Invalid add proposal");
     }
     return proposal;

@@ -34,15 +34,15 @@ export class Encoder {
      */
     writeUint8Array(data: Uint8Array, isVarVector = true) {
         try {
-            if(isVarVector) {
+            if (isVarVector) {
                 // encode the data as a VarVector and append it to the fragments
                 const vector = VarVector.encode(data);
                 this.#fragments.push(vector.buffer);
             } else {
                 this.#fragments.push(data.buffer);
             }
-        } catch(error) {
-            if(error instanceof RangeError) {
+        } catch (error) {
+            if (error instanceof RangeError) {
                 throw new EncodeError("Uint8Array is too large to encode");
             }
             throw error;
@@ -67,9 +67,8 @@ export class Decoder {
     }
 
     readUint8Array() {
-        const data = VarVector.decode(this.#data.subarray(this.#offset));
-        // offset by the length + 1 (the varvec length)
-        this.#offset += data.length + 1;
+        const { data, offset } = VarVector.decode(this.#data.subarray(this.#offset));
+        this.#offset += data.length + offset;
         return data;
     }
 
@@ -109,10 +108,17 @@ export class Decoder {
         this.#offset += 8;
         return value;
     }
+
+    get offset() {
+        return this.#offset;
+    }
+    get data() {
+        return this.#data;
+    }
 }
 
 function IsGREASEValue(value: number) {
-    return [0x1A1A,0x2A2A,0x3A3A,0x4A4A,0x5A5A,0x6A6A,0x7A7A,0x8A8A,0x9A9A,0xAAAA,0xBABA,0xCACA,0xDADA,0xEAEA].includes(value);
+    return [0x1a1a, 0x2a2a, 0x3a3a, 0x4a4a, 0x5a5a, 0x6a6a, 0x7a7a, 0x8a8a, 0x9a9a, 0xaaaa, 0xbaba, 0xcaca, 0xdada, 0xeaea].includes(value);
 }
 
 export { IsGREASEValue };

@@ -1,14 +1,19 @@
 import type { Credential } from "./Credential";
-import { ArraysEqual, DecodeCipherSuiteType, GenerateKeyPair, GenerateSigningKeyPair, GetCurrentTime, MAC, SignWithLabel, VerifyWithLabel } from "./CryptoHelper";
+import { ArraysEqual, DecodeCipherSuiteType, GenerateSigningKeyPair, MAC, VerifyWithLabel } from "./CryptoHelper";
 import { CipherSuiteType, CredentialType, ExtensionType, LeafNodeSource, ProtocolVersion } from "./Enums";
 import InvalidObjectError from "./errors/InvalidObjectError";
 import type { Extension } from "./Extension";
 import { type GroupContext } from "./GroupContext";
 import KeySchedule from "./KeySchedule";
-import { ConstructKeyPackageSignatureData, type KeyPackage } from "./messages/KeyPackage";
+import {
+    ConstructKeyPackageSignatureData,
+    EncodeKeyPackage,
+    GenerateKeyPackage,
+    type KeyPackage
+} from "./messages/KeyPackage";
 import type { AddProposal } from "./proposals/Add";
 import type { UpdateProposal } from "./proposals/Update";
-import RatchetTree, { ConstructLeafNodeSignatureData, GetDefaultCapabilities, type LeafNode } from "./RatchetTree";
+import RatchetTree, { ConstructLeafNodeSignatureData, GenerateLeafNode, type LeafNode } from "./RatchetTree";
 import type Uint32 from "./types/Uint32";
 import Uint64 from "./types/Uint64";
 
@@ -43,7 +48,15 @@ class Group {
             throw new InvalidObjectError("Signature is missing");
         }
         const signatureKey = keyPackage.leaf_node.signature_key;
-        if (!(await VerifyWithLabel(signatureKey, new TextEncoder().encode("KeyPackageTBS"), signatureContent, signature, keyPackage.cipher_suite))) {
+        if (
+            !(await VerifyWithLabel(
+                signatureKey,
+                new TextEncoder().encode("KeyPackageTBS"),
+                signatureContent,
+                signature,
+                keyPackage.cipher_suite
+            ))
+        ) {
             throw new InvalidObjectError("Invalid signature");
         }
         // verify that the leaf node's encryption key is different from init key
@@ -59,7 +72,11 @@ class Group {
         const cipherSuite = groupContext.cipher_suite;
         // validate credential
         // validate signature
-        const signatureContent = ConstructLeafNodeSignatureData(node, leaf_index != null ? groupContext.group_id : undefined, leaf_index ?? undefined);
+        const signatureContent = ConstructLeafNodeSignatureData(
+            node,
+            leaf_index != null ? groupContext.group_id : undefined,
+            leaf_index ?? undefined
+        );
         const signature = node.signature;
         if (signature == null) {
             throw new InvalidObjectError("Signature is missing");
@@ -69,7 +86,9 @@ class Group {
             throw new InvalidObjectError("Invalid signature");
         }
         // validate compatibility with group context
-        const requiredCapabilities = groupContext.extensions.find((e) => e.extension_type === ExtensionType.required_capabilities) as Extension<ExtensionType.required_capabilities>;
+        const requiredCapabilities = groupContext.extensions.find(
+            (e) => e.extension_type === ExtensionType.required_capabilities
+        ) as Extension<ExtensionType.required_capabilities>;
         if (requiredCapabilities != null) {
             // verify that every extensions, proposals and credentials types are found in the capabilities
             if (!requiredCapabilities.extension_data.credential_types.every((c) => node.capabilities.credentials.includes(c))) {
@@ -83,7 +102,7 @@ class Group {
             }
         }
         // verify that the leaf node's credential is supported by every leaf node in the group
-        for (const leaf of groupLeaves.map(l => l.data as LeafNode)) {
+        for (const leaf of groupLeaves.map((l) => l.data as LeafNode)) {
             if (!leaf.capabilities.credentials.includes(node.credential.credential_type)) {
                 throw new InvalidObjectError("Credential type not supported by a group member");
             }
@@ -108,11 +127,11 @@ class Group {
         }
         // verify that signature_key and encryption_key is unique amongst the group
         const uniqueKeys = new Array<Uint8Array>();
-        for (const leaf of groupLeaves.map(l => l.data as LeafNode)) {
+        for (const leaf of groupLeaves.map((l) => l.data as LeafNode)) {
             uniqueKeys.push(leaf.signature_key);
             uniqueKeys.push(leaf.encryption_key);
         }
-        if (!uniqueKeys.every(k => !ArraysEqual(k, node.signature_key) && !ArraysEqual(k, node.encryption_key))) {
+        if (!uniqueKeys.every((k) => !ArraysEqual(k, node.signature_key) && !ArraysEqual(k, node.encryption_key))) {
             throw new InvalidObjectError("Signature key or encryption key is not unique");
         }
         return true;
@@ -130,7 +149,9 @@ class Group {
 
     async processUpdateProposal(proposal: UpdateProposal, prevLeafNode: LeafNode, leaf_index: Uint32) {
         // the proposal is only valid, if the leaf_node is valid
-        const leafNodeValid = await this.validateLeafNode(proposal.leaf_node, LeafNodeSource.update, leaf_index, prevLeafNode).catch(() => false);
+        const leafNodeValid = await this.validateLeafNode(proposal.leaf_node, LeafNodeSource.update, leaf_index, prevLeafNode).catch(
+            () => false
+        );
         if (!leafNodeValid) {
             throw new InvalidObjectError("Leaf node is not valid");
         }
@@ -149,28 +170,24 @@ class Group {
      * Create a new group with the given parameters.
      * After the group is created, the DS will be contacted and the function will fail if the DS rejects the group.
      */
-    static async create(signatureKeyPub: Uint8Array, signatureKeyPriv: Uint8Array, credential: Credential, clientExtensions: Extension<ExtensionType.application_id>[], groupExtensions: Extension<ExtensionType.required_capabilities>[], cipherSuite: CipherSuiteType) {
+    static async create(
+        signatureKeyPub: Uint8Array,
+        signatureKeyPriv: Uint8Array,
+        credential: Credential,
+        clientExtensions: Extension<ExtensionType.application_id>[],
+        groupExtensions: Extension<ExtensionType.required_capabilities>[],
+        cipherSuite: CipherSuiteType
+    ) {
         const suite = DecodeCipherSuiteType(cipherSuite);
-        // generate a new encryption keypair
-        const encryptionKeyPair = await GenerateKeyPair(cipherSuite);
-        const currentTime = Uint64.from(GetCurrentTime());
         // construct our leaf node
-        const leafNode = {
-            encryption_key: encryptionKeyPair.publicKey,
-            signature_key: signatureKeyPub,
+        const { node: leafNode, nodePrivateKey } = await GenerateLeafNode({
+            cipherSuite,
+            signingKeyPriv: signatureKeyPriv,
+            signingKeyPub: signatureKeyPub,
             credential,
-            capabilities: GetDefaultCapabilities(),
-            leaf_node_source: LeafNodeSource.key_package,
-            lifetime: {
-                not_before: currentTime.subtract(Uint64.from(86400n)),
-                not_after: currentTime.add(Uint64.from(86400n))
-            },
             extensions: clientExtensions,
-            signature: new Uint8Array(0)
-        } satisfies LeafNode;
-        const signatureData = ConstructLeafNodeSignatureData(leafNode);
-        const signature = await SignWithLabel(signatureKeyPriv, new TextEncoder().encode("LeafNodeTBS"), signatureData, cipherSuite);
-        leafNode.signature = signature;
+            validFor: 86400n
+        });
         // construct the ratchet tree
         const ratchetTree = RatchetTree.buildFromLeaves([leafNode]);
         // construct the group context
@@ -200,8 +217,8 @@ class Group {
         // TODO: implement the DS
         return {
             group,
-            encryptionKeyPair
-        }
+            nodePrivateKey
+        };
     }
 
     /**
@@ -223,11 +240,31 @@ class Group {
     }
 }
 
-const cipherSuite = CipherSuiteType.MLS_128_DHKEMX25519_AES128GCM_SHA256_Ed25519;
-const signingKeyPair = await GenerateSigningKeyPair(cipherSuite);
-const credential = {
+const cipherSuite = CipherSuiteType.MLS_256_DHKEMP384_AES256GCM_SHA384_P384;
+const signingKeyPairAlice = await GenerateSigningKeyPair(cipherSuite);
+const credentialAlice = {
     credential_type: CredentialType.basic,
-    identity: new TextEncoder().encode("test"),
+    identity: new TextEncoder().encode("testAlice")
 } satisfies Credential;
-const { group, encryptionKeyPair } = await Group.create(signingKeyPair.publicKey, signingKeyPair.privateKey, credential, [], [], cipherSuite);
-console.log(group, encryptionKeyPair);
+const { group, nodePrivateKey: nodePrivateKeyAlice } = await Group.create(
+    signingKeyPairAlice.publicKey,
+    signingKeyPairAlice.privateKey,
+    credentialAlice,
+    [],
+    [],
+    cipherSuite
+);
+const signingKeyPairBob = await GenerateSigningKeyPair(cipherSuite);
+const credentialBob = {
+    credential_type: CredentialType.basic,
+    identity: new TextEncoder().encode("testBob")
+} satisfies Credential;
+const { keyPackage: keyPackageBob } = await GenerateKeyPackage({
+    cipherSuite,
+    signingKeyPriv: signingKeyPairBob.privateKey,
+    signingKeyPub: signingKeyPairBob.publicKey,
+    credential: credentialBob,
+    extensions: [],
+    validFor: 86400n
+});
+const encoded = EncodeKeyPackage(keyPackageBob);

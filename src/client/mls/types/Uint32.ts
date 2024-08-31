@@ -186,11 +186,7 @@ export default class Uint32 {
         if (buffer.length !== 4) {
             throw new Error("Invalid buffer length");
         }
-        const value =
-            (buffer[0] << 24) |
-            (buffer[1] << 16) |
-            (buffer[2] << 8) |
-            buffer[3];
+        const value = (buffer[0] << 24) | (buffer[1] << 16) | (buffer[2] << 8) | buffer[3];
         return new Uint32(value >>> 0);
     }
 

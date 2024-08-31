@@ -9,28 +9,26 @@ function encodeVarintLength(value: number): Uint8Array {
         throw new RangeError("Value out of range for variable-length integer encoding.");
     }
 
-    let bytes: number[] = [];
-    let prefix: number;
-
-    if (value < 64) {
-        prefix = 0;
-        bytes.push(value);
-    } else if (value < 16384) {
-        prefix = 1;
-        bytes.push((value & 0x3f) | 0x40);
-        bytes.push((value >> 6) & 0xff);
-    } else if (value < 1073741824) {
-        prefix = 2;
-        bytes.push((value & 0x3f) | 0x80);
-        bytes.push((value >> 6) & 0xff);
-        bytes.push((value >> 14) & 0xff);
-        bytes.push((value >> 22) & 0xff);
+    if (value <= 63) {
+        // Encoding with 1 byte: 00xxxxxx
+        const result = new Uint8Array(1);
+        result[0] = value & 0x3f; // Masking to fit within 6 bits
+        return result;
+    } else if (value <= 16383) {
+        // Encoding with 2 bytes: 01xxxxxx xxxxxxxx
+        const result = new Uint8Array(2);
+        result[0] = 0x40 | ((value >> 8) & 0x3f); // 01 in the first two bits
+        result[1] = value & 0xff;
+        return result;
     } else {
-        throw new RangeError("Value out of range for variable-length integer encoding.");
+        // Encoding with 4 bytes: 10xxxxxx xxxxxxxx xxxxxxxx xxxxxxxx
+        const result = new Uint8Array(4);
+        result[0] = 0x80 | ((value >> 24) & 0x3f); // 10 in the first two bits
+        result[1] = (value >> 16) & 0xff;
+        result[2] = (value >> 8) & 0xff;
+        result[3] = value & 0xff;
+        return result;
     }
-
-    bytes[0] |= prefix << 6;
-    return new Uint8Array(bytes);
 }
 
 /**
@@ -39,7 +37,7 @@ function encodeVarintLength(value: number): Uint8Array {
  * @returns The decoded integer value.
  * @throws Error if the encoding is invalid.
  */
-function decodeVarintLength(data: Uint8Array): number {
+function decodeVarintLength(data: Uint8Array) {
     let v = data[0];
     let prefix = v >> 6;
 
@@ -59,7 +57,7 @@ function decodeVarintLength(data: Uint8Array): number {
         throw new Error("Minimum encoding was not used");
     }
 
-    return v;
+    return { size: v, offset: length };
 }
 
 /**
@@ -86,10 +84,18 @@ export default class VarVector {
      * @returns A Uint8Array containing the decoded data.
      */
     static decode(data: Uint8Array) {
-        const length = decodeVarintLength(data);
-        if (length + 1 > data.length) {
+        const { size, offset } = decodeVarintLength(data);
+        if (size + offset > data.length) {
             throw new Error("Vector length exceeds available data.");
         }
-        return data.slice(1, length + 1);
+        return { data: data.slice(offset, offset + size), offset };
     }
 }
+
+// console.log(encodeVarintLength(494878333), new Uint8Array([0x9d,0x7f,0x3e,0x7d]));
+// const original = crypto.getRandomValues(new Uint8Array(100));
+// const encoded = VarVector.encode(original);
+// const decoded = VarVector.decode(encoded);
+// console.log("original:", original);
+// console.log("encoded:", encoded);
+// console.log("decoded:", decoded);
