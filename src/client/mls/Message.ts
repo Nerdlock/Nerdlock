@@ -1,9 +1,8 @@
 import type { Commit } from "./Commit";
-import { SignWithLabel } from "./CryptoHelper";
 import { Decoder, Encoder } from "./Encoding";
-import { CipherSuiteType, ContentType, ProtocolVersion, SenderType, WireFormat } from "./Enums";
+import { ContentType, ProtocolVersion, SenderType, WireFormat } from "./Enums";
 import MalformedObjectError from "./errors/MalformedObjectError";
-import { EncodeGroupContext, IsGroupContext, type GroupContext } from "./GroupContext";
+import { EncodeGroupContext, type GroupContext } from "./GroupContext";
 import { IsGroupInfo, type GroupInfo } from "./messages/GroupInfo";
 import { IsKeyPackage, type KeyPackage } from "./messages/KeyPackage";
 import { IsPrivateMessage, type PrivateMessage } from "./messages/PrivateMessage";
@@ -156,8 +155,7 @@ interface FramedContentBase {
     epoch: Uint64;
     sender: Sender;
     content_type: ContentType;
-    // the authenticated_data might not exist, but must be validated when necessary
-    authenticated_data?: Uint8Array;
+    authenticated_data: Uint8Array;
 }
 
 interface FramedContentApplication extends FramedContentBase {
@@ -194,9 +192,8 @@ function IsFramedContentBase(object: unknown): object is FramedContentBase {
             ContentType.proposal,
             ContentType.commit
         ].includes(object.content_type) &&
-        // check if authenticated_data field exists
-        // it is optional, but if it exists, it must be a Uint8Array
-        (("authenticated_data" in object && object.authenticated_data instanceof Uint8Array) || ("authenticated_data" in object && object.authenticated_data === undefined))
+        "authenticated_data" in object &&
+        object.authenticated_data instanceof Uint8Array
     );
 }
 
@@ -251,101 +248,43 @@ function IsFramedContent(object: unknown): object is FramedContent {
  * @param content The FramedContent to encode
  * @returns The encoded FramedContent without the authenticated data
  */
-function EncodeFramedContent(content: Omit<FramedContent, "authenticated_data">) {
+function EncodeFramedContent(content: FramedContent) {
     const encoder = new Encoder();
     encoder.writeUint8Array(content.group_id);
     encoder.writeUint64(content.epoch);
     encoder.writeUint8Array(EncodeSender(content.sender));
     encoder.writeUint8(Uint8.from(content.content_type));
+    encoder.writeUint8Array(content.authenticated_data)
     if (IsFramedContentApplication(content)) {
         encoder.writeUint8Array(content.application_data);
     }
     return encoder.flush();
 }
 
-export { IsFramedContent, IsFramedContentApplication, IsFramedContentCommit, IsFramedContentProposal };
-export type { FramedContent };
-
-interface FramedContentTBSBase {
-    version: ProtocolVersion.mls10;
-    wire_format: WireFormat;
-    content: FramedContent;
-}
-
-interface FramedContentTBSGroupContext extends FramedContentTBSBase {
-    context: GroupContext;
-}
-
-type FramedContentTBS = FramedContentTBSGroupContext | FramedContentTBSBase;
-
-function IsFramedContentTBSBase(object: unknown): object is FramedContentTBSBase {
-    return (
-        typeof object === "object" &&
-        object !== null &&
-        "version" in object &&
-        "wire_format" in object &&
-        "content" in object &&
-        IsFramedContent(object.content)
-    );
-}
-
-function IsFramedContentTBSGroupContext(object: unknown): object is FramedContentTBSGroupContext {
-    if (!IsFramedContentTBSBase(object)) {
-        return false;
-    }
-    // context is GroupContext
-    return (
-        "context" in object &&
-        IsGroupContext(object.context) &&
-        // content.sender.sender_type must be member or new_member_commit
-        (
-            object.content.sender.sender_type === SenderType.member ||
-            object.content.sender.sender_type === SenderType.new_member_commit
-        )
-    );
-}
-
-function IsFramedContentTBSMember(object: unknown): object is FramedContentTBSGroupContext {
-    if (!IsFramedContentTBSGroupContext(object)) {
-        return false;
-    }
-    return object.content.sender.sender_type === SenderType.member;
-}
-
-function IsFramedContentTBSNewMemberCommit(object: unknown): object is FramedContentTBSGroupContext {
-    if (!IsFramedContentTBSGroupContext(object)) {
-        return false;
-    }
-    return object.content.sender.sender_type === SenderType.new_member_commit;
-}
-
-function IsFramedContentTBS(object: unknown): object is FramedContentTBS {
-    return (
-        IsFramedContentTBSMember(object) ||
-        IsFramedContentTBSNewMemberCommit(object) ||
-        // if the object is just the base, it must only have 3 fields
-        (IsFramedContentTBSBase(object) && Object.keys(object).length === 3)
-    );
-}
-
 /**
- * Encode a FramedContentTBS object to be used for signing
- * @param framedContent The FramedContentTBS to encode
- * @returns The encoded FramedContentTBS, ready to be signed
+ * Constructs the raw bytes of an encoded FramedContentTBS structure from a FramedContent object for signing/verification.
+ * @param version The version of the MLS protocol to use.
+ * @param wireFormat The wire format to use.
+ * @param content The FramedContent to encode.
+ * @param context The GroupContext to encode, if needed.
+ * @returns The raw bytes of an encoded FramedContentTBS structure, ready to be used for signing/verification.
  */
-function EncodeFramedContentTBS(framedContent: FramedContentTBS) {
+function ConstructFramedContentSignatureData(version: ProtocolVersion, wireFormat: WireFormat, content: FramedContent, context: GroupContext) {
     const encoder = new Encoder();
-    encoder.writeUint16(Uint16.from(framedContent.version));
-    encoder.writeUint16(Uint16.from(framedContent.wire_format));
-    encoder.writeUint8Array(EncodeFramedContent(framedContent.content));
-    if (IsFramedContentTBSGroupContext(framedContent)) {
-        encoder.writeUint8Array(EncodeGroupContext(framedContent.context));
+    encoder.writeUint16(Uint16.from(version));
+    encoder.writeUint16(Uint16.from(wireFormat));
+    encoder.writeUint8Array(EncodeFramedContent(content));
+    if(content.sender.sender_type === SenderType.member || content.sender.sender_type === SenderType.new_member_commit) {
+        if(context == null) {
+            throw new Error("Group context is missing");
+        }
+        encoder.writeUint8Array(EncodeGroupContext(context));
     }
     return encoder.flush();
 }
 
-export { IsFramedContentTBS, IsFramedContentTBSMember, IsFramedContentTBSNewMemberCommit };
-export type { FramedContentTBS };
+export { ConstructFramedContentSignatureData, IsFramedContent, IsFramedContentApplication, IsFramedContentCommit, IsFramedContentProposal };
+export type { FramedContent };
 
 interface FramedContentAuthDataBase {
     signature: Uint8Array;
@@ -373,8 +312,7 @@ function IsFramedContentAuthDataCommit(object: unknown, contentType: ContentType
     return (
         contentType === ContentType.commit &&
         "confirmation_tag" in object &&
-        object.confirmation_tag instanceof Uint8Array &&
-        Object.keys(object).length === 2
+        object.confirmation_tag instanceof Uint8Array
     );
 }
 
@@ -389,11 +327,6 @@ function EncodeFramedContentAuthData(auth: FramedContentAuthData, contentType: C
         encoder.writeUint8Array(auth.confirmation_tag);
     }
     return encoder.flush();
-}
-
-function ConstructFramedContentAuthDataSignature(key: Uint8Array, framedContentTBS: FramedContentTBS, cipherSuite: CipherSuiteType) {
-    const encodedContent = EncodeFramedContentTBS(framedContentTBS);
-    return SignWithLabel(key, new TextEncoder().encode("FramedContentTBS"), encodedContent, cipherSuite);
 }
 
 export { IsFramedContentAuthData };
@@ -425,6 +358,9 @@ function EncodeAuthenticatedContent(content: AuthenticatedContent) {
     encoder.writeUint8Array(EncodeFramedContentAuthData(content.auth, content.content.content_type));
     return encoder.flush();
 }
+
+export { EncodeAuthenticatedContent, IsAuthenticatedContent };
+export type { AuthenticatedContent };
 
 interface MLSMessageBase {
     version: ProtocolVersion.mls10;
@@ -490,9 +426,6 @@ function IsMLSMessagePublic(object: unknown): object is MLSMessagePublic {
         object.wire_format === WireFormat.mls_public_message &&
         "public_message" in object &&
         IsPublicMessage(object.public_message)
-        &&
-        // only fields are version, wire_format, public_message
-        Object.keys(object).length === 3
     );
 }
 
@@ -507,9 +440,6 @@ function IsMLSMessagePrivate(object: unknown): object is MLSMessagePrivate {
         object.wire_format === WireFormat.mls_private_message &&
         "private_message" in object &&
         IsPrivateMessage(object.private_message)
-        &&
-        // only fields are version, wire_format, private_message
-        Object.keys(object).length === 3
     );
 }
 
@@ -524,9 +454,6 @@ function IsMLSMessageWelcome(object: unknown): object is MLSMessageWelcome {
         object.wire_format === WireFormat.mls_welcome &&
         "welcome" in object &&
         IsWelcome(object.welcome)
-        &&
-        // only fields are version, wire_format, welcome
-        Object.keys(object).length === 3
     );
 }
 
@@ -541,9 +468,6 @@ function IsMLSMessageGroupInfo(object: unknown): object is MLSMessageGroupInfo {
         object.wire_format === WireFormat.mls_group_info &&
         "group_info" in object &&
         IsGroupInfo(object.group_info)
-        &&
-        // only fields are version, wire_format, group_info
-        Object.keys(object).length === 3
     );
 }
 function IsMLSMessageKeyPackage(object: unknown): object is MLSMessageKeyPackage {
@@ -557,9 +481,6 @@ function IsMLSMessageKeyPackage(object: unknown): object is MLSMessageKeyPackage
         object.wire_format === WireFormat.mls_key_package &&
         "key_package" in object &&
         IsKeyPackage(object.key_package)
-        &&
-        // only fields are version, wire_format, key_package
-        Object.keys(object).length === 3
     );
 }
 
@@ -575,3 +496,4 @@ function IsMLSMessage(object: unknown): object is MLSMessage {
 
 export { IsMLSMessage, IsMLSMessageGroupInfo, IsMLSMessageKeyPackage, IsMLSMessagePrivate, IsMLSMessagePublic, IsMLSMessageWelcome };
 export type { MLSMessage };
+
