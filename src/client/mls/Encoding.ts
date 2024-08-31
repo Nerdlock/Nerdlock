@@ -30,43 +30,30 @@ export class Encoder {
     /**
      * Write a Uint8Array as a VarVector.
      * @param data The Uint8Array to encode.
+     * @param isVarVector Whether to encode the data as a VarVector (when we don't know the length of the data).
      */
-    writeUint8Array(data: Uint8Array) {
+    writeUint8Array(data: Uint8Array, isVarVector = true) {
         try {
-            
-            // encode the data as a VarVector and append it to the fragments
-            const vector = VarVector.encode(data);
-            this.#fragments.push(vector.buffer);
+            if(isVarVector) {
+                // encode the data as a VarVector and append it to the fragments
+                const vector = VarVector.encode(data);
+                this.#fragments.push(vector.buffer);
+            } else {
+                this.#fragments.push(data.buffer);
+            }
         } catch(error) {
             if(error instanceof RangeError) {
                 throw new EncodeError("Uint8Array is too large to encode");
             }
             throw error;
         }
+        return this;
     }
 
-    writeUint8(value: Uint8) {
-        // call the Uint8.encode method to get the encoded value
+    writeUint(value: Uint8 | Uint16 | Uint32 | Uint64) {
         const encoded = value.encode();
         this.#fragments.push(encoded.buffer);
-    }
-
-    writeUint16(value: Uint16) {
-        // call the Uint16.encode method to get the encoded value
-        const encoded = value.encode();
-        this.#fragments.push(encoded.buffer);
-    }
-
-    writeUint32(value: Uint32) {
-        // call the Uint32.encode method to get the encoded value
-        const encoded = value.encode();
-        this.#fragments.push(encoded.buffer);
-    }
-
-    writeUint64(value: Uint64) {
-        // call the Uint64.encode method to get the encoded value
-        const encoded = value.encode();
-        this.#fragments.push(encoded.buffer);
+        return this;
     }
 }
 

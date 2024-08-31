@@ -1,5 +1,6 @@
 import type { ProposalOrRefType } from "./Enums";
 import type { Proposal } from "./Proposal";
+import type Uint32 from "./types/Uint32";
 
 interface ProposalOrRefBase {
     type: ProposalOrRefType;

@@ -1,10 +1,11 @@
 import ArrayTree, { type IndexedType } from "./ArrayTree";
-import { EncodeCredential, IsCredential, type Credential } from "./Credential";
+import { DecodeCredential, EncodeCredential, IsCredential, type Credential } from "./Credential";
 import { GetAllCipherSuites, Hash } from "./CryptoHelper";
 import { Decoder, Encoder } from "./Encoding";
 import { CredentialType, ExtensionType, LeafNodeSource, ProtocolVersion, type CipherSuiteType, type ProposalType } from "./Enums";
 import EncodeError from "./errors/EncodeError";
-import { EncodeExtension, type Extension } from "./Extension";
+import InvalidObjectError from "./errors/InvalidObjectError";
+import { DecodeExtension, EncodeExtension, type Extension } from "./Extension";
 import Uint16 from "./types/Uint16";
 import Uint32 from "./types/Uint32";
 import Uint64 from "./types/Uint64";
@@ -36,8 +37,8 @@ function EncodeParentNode(node: ParentNode) {
     const encoder = new Encoder();
     encoder.writeUint8Array(node.encryption_key);
     encoder.writeUint8Array(node.parent_hash);
-    encoder.writeUint32(Uint32.from(node.unmerged_leaves.length));
-    node.unmerged_leaves.forEach((l) => encoder.writeUint32(Uint32.from(l)));
+    encoder.writeUint(Uint32.from(node.unmerged_leaves.length));
+    node.unmerged_leaves.forEach((l) => encoder.writeUint(Uint32.from(l)));
     return encoder.flush();
 }
 
@@ -92,16 +93,16 @@ function IsCapabilities(object: unknown): object is Capabilities {
 
 function EncodeCapabilities(capabilities: Capabilities) {
     const encoder = new Encoder();
-    encoder.writeUint16(Uint16.from(capabilities.versions.length));
-    capabilities.versions.forEach((v) => encoder.writeUint16(Uint16.from(v)));
-    encoder.writeUint16(Uint16.from(capabilities.cipher_suites.length));
-    capabilities.cipher_suites.forEach((v) => encoder.writeUint16(Uint16.from(v)));
-    encoder.writeUint16(Uint16.from(capabilities.extensions.length));
-    capabilities.extensions.forEach((v) => encoder.writeUint16(Uint16.from(v)));
-    encoder.writeUint16(Uint16.from(capabilities.proposals.length));
-    capabilities.proposals.forEach((v) => encoder.writeUint16(Uint16.from(v)));
-    encoder.writeUint16(Uint16.from(capabilities.credentials.length));
-    capabilities.credentials.forEach((v) => encoder.writeUint16(Uint16.from(v)));
+    encoder.writeUint(Uint16.from(capabilities.versions.length));
+    capabilities.versions.forEach((v) => encoder.writeUint(Uint16.from(v)));
+    encoder.writeUint(Uint16.from(capabilities.cipher_suites.length));
+    capabilities.cipher_suites.forEach((v) => encoder.writeUint(Uint16.from(v)));
+    encoder.writeUint(Uint16.from(capabilities.extensions.length));
+    capabilities.extensions.forEach((v) => encoder.writeUint(Uint16.from(v)));
+    encoder.writeUint(Uint16.from(capabilities.proposals.length));
+    capabilities.proposals.forEach((v) => encoder.writeUint(Uint16.from(v)));
+    encoder.writeUint(Uint16.from(capabilities.credentials.length));
+    capabilities.credentials.forEach((v) => encoder.writeUint(Uint16.from(v)));
     return encoder.flush();
 }
 
@@ -172,6 +173,26 @@ function IsLifeTime(object: unknown): object is Lifetime {
         "not_after" in object &&
         object.not_after instanceof Uint64
     );
+}
+
+function EncodeLifeTime(lifetime: Lifetime) {
+    const encoder = new Encoder();
+    encoder.writeUint(lifetime.not_before);
+    encoder.writeUint(lifetime.not_after);
+    return encoder.flush();
+}
+
+function DecodeLifetime(decoder: Decoder): Lifetime {
+    const not_before = decoder.readUint64();
+    const not_after = decoder.readUint64();
+    const lifetime = {
+        not_before,
+        not_after
+    }
+    if(!IsLifeTime(lifetime)) {
+        throw new InvalidObjectError("Invalid lifetime");
+    }
+    return lifetime;
 }
 
 interface LeafNodeBase {
@@ -248,23 +269,27 @@ function IsLeafNodeCommit(object: unknown): object is LeafNodeCommit {
     );
 }
 
+function IsLeafNode(object: unknown): object is LeafNode {
+    return IsLeafNodeBase(object) || IsLeafNodeKeyPackage(object) || IsLeafNodeCommit(object);
+}
+
 function ConstructLeafNodeSignatureData(node: LeafNode, group_id?: Uint8Array, leaf_index?: Uint32) {
     // encode a LeafNodeTBS structure to be used for signing/verification
     const encoder = new Encoder();
     encoder.writeUint8Array(node.encryption_key);
     encoder.writeUint8Array(node.signature_key);
-    encoder.writeUint8Array(EncodeCredential(node.credential));
-    encoder.writeUint8Array(EncodeCapabilities(node.capabilities));
-    encoder.writeUint8(Uint8.from(node.leaf_node_source));
+    encoder.writeUint8Array(EncodeCredential(node.credential), false);
+    encoder.writeUint8Array(EncodeCapabilities(node.capabilities), false);
+    encoder.writeUint(Uint8.from(node.leaf_node_source));
     if (IsLeafNodeKeyPackage(node)) {
-        encoder.writeUint64(node.lifetime.not_before);
-        encoder.writeUint64(node.lifetime.not_after);
+        encoder.writeUint(node.lifetime.not_before);
+        encoder.writeUint(node.lifetime.not_after);
     }
     if (IsLeafNodeCommit(node)) {
         encoder.writeUint8Array(node.parent_hash);
     }
-    encoder.writeUint16(Uint16.from(node.extensions.length));
-    node.extensions.forEach((e) => encoder.writeUint8Array(EncodeExtension(e)));
+    encoder.writeUint(Uint16.from(node.extensions.length));
+    node.extensions.forEach((e) => encoder.writeUint8Array(EncodeExtension(e), false));
     if (node.leaf_node_source === LeafNodeSource.update || node.leaf_node_source === LeafNodeSource.commit) {
         if (group_id == null) {
             throw new EncodeError("Group id is missing");
@@ -273,7 +298,7 @@ function ConstructLeafNodeSignatureData(node: LeafNode, group_id?: Uint8Array, l
             throw new EncodeError("Leaf index is missing");
         }
         encoder.writeUint8Array(group_id);
-        encoder.writeUint32(leaf_index);
+        encoder.writeUint(leaf_index);
     }
     return encoder.flush();
 }
@@ -285,24 +310,59 @@ function EncodeLeafNode(node: LeafNode) {
     const encoder = new Encoder();
     encoder.writeUint8Array(node.encryption_key);
     encoder.writeUint8Array(node.signature_key);
-    encoder.writeUint8Array(EncodeCredential(node.credential));
-    encoder.writeUint8Array(EncodeCapabilities(node.capabilities));
-    encoder.writeUint8(Uint8.from(node.leaf_node_source));
+    encoder.writeUint8Array(EncodeCredential(node.credential), false);
+    encoder.writeUint8Array(EncodeCapabilities(node.capabilities), false);
+    encoder.writeUint(Uint8.from(node.leaf_node_source));
     if (IsLeafNodeKeyPackage(node)) {
-        encoder.writeUint64(node.lifetime.not_before);
-        encoder.writeUint64(node.lifetime.not_after);
+        encoder.writeUint8Array(EncodeLifeTime(node.lifetime), false);
     }
     if (IsLeafNodeCommit(node)) {
         encoder.writeUint8Array(node.parent_hash);
     }
-    encoder.writeUint16(Uint16.from(node.extensions.length));
-    node.extensions.forEach((e) => encoder.writeUint8Array(EncodeExtension(e)));
+    encoder.writeUint(Uint16.from(node.extensions.length));
+    node.extensions.forEach((e) => encoder.writeUint8Array(EncodeExtension(e), false));
     encoder.writeUint8Array(node.signature);
     return encoder.flush();
 }
 
+function DecodeLeafNode(decoder: Decoder): LeafNode {
+    const encryption_key = decoder.readUint8Array();
+    const signature_key = decoder.readUint8Array();
+    const credential = DecodeCredential(decoder);
+    const capabilities = DecodeCapabilities(decoder);
+    const leaf_node_source = decoder.readUint8().value;
+    let lifetime: Lifetime | undefined = undefined;
+    let parent_hash: Uint8Array | undefined = undefined;
+    if(leaf_node_source === LeafNodeSource.key_package) {
+        lifetime = DecodeLifetime(decoder);
+    }
+    if(leaf_node_source === LeafNodeSource.commit) {
+        parent_hash = decoder.readUint8Array();
+    }
+    const extensionsLength = decoder.readUint16().value;
+    const extensions: Extension<ExtensionType>[] = [];
+    for (let i = 0; i < extensionsLength; i++) {
+        extensions.push(DecodeExtension(decoder));
+    }
+    const signature = decoder.readUint8Array();
+    const leaf_node = {
+        encryption_key,
+        signature_key,
+        credential,
+        capabilities,
+        leaf_node_source,
+        lifetime,
+        parent_hash,
+        extensions,
+        signature
+    }
+    if(!IsLeafNode(leaf_node)) {
+        throw new InvalidObjectError("Invalid leaf node");
+    }
+    return leaf_node;
+}
 
-export { ConstructLeafNodeSignatureData, EncodeLeafNode, IsLeafNodeBase, IsLeafNodeCommit, IsLeafNodeKeyPackage };
+export { ConstructLeafNodeSignatureData, EncodeLeafNode, IsLeafNodeBase, IsLeafNodeCommit, IsLeafNodeKeyPackage, IsLeafNode, DecodeLeafNode };
 export type { LeafNode, LeafNodeCommit, LeafNodeKeyPackage };
 
 type RatchetTreeNode = ParentNode | LeafNode;
@@ -312,23 +372,45 @@ export default class RatchetTree extends ArrayTree<RatchetTreeNode> {
         // check if node is a leaf
         if (node.index % 2 === 0) {
             const encoder = new Encoder();
-            encoder.writeUint32(Uint32.from(node.index));
+            encoder.writeUint(Uint32.from(node.index));
             if (node.data != null) {
                 const leafData = node.data as LeafNode;
-                encoder.writeUint8Array(EncodeLeafNode(leafData));
+                encoder.writeUint8Array(EncodeLeafNode(leafData), false);
             }
             return Hash(encoder.flush(), cipherSuite);
         }
         // recursively hash the parent's children
         const encoder = new Encoder();
-        if(node.data != null) {
+        if (node.data != null) {
             const parentData = node.data as ParentNode;
-            encoder.writeUint8Array(EncodeParentNode(parentData));
+            encoder.writeUint8Array(EncodeParentNode(parentData), false);
         }
         encoder.writeUint8Array(await this.hash(node.left(), cipherSuite));
         encoder.writeUint8Array(await this.hash(node.right(), cipherSuite));
         return Hash(encoder.flush(), cipherSuite);
-    }   
+    }
+
+    addLeaf(leaf: LeafNode) {
+        let firstEmpty = this.firstEmptyLeaf;
+        if (firstEmpty == null) {
+            this.extend();
+        }
+        firstEmpty = this.firstEmptyLeaf;
+        if(!IsLeafNode(firstEmpty?.data)) {
+            throw new Error("No empty leaves after extending???");
+        }
+        firstEmpty.data = leaf;
+    }
+
+    resolution(node: IndexedType<RatchetTreeNode>) {
+        /*
+        The resolution of a node is an ordered list of non-blank nodes that collectively cover all non-blank descendants of the node. The resolution of the root contains the set of keys that are collectively necessary to encrypt to every node in the group. The resolution of a node is effectively a depth-first, left-first enumeration of the nearest non-blank nodes below the node:
+
+The resolution of a non-blank node comprises the node itself, followed by its list of unmerged leaves, if any.
+The resolution of a blank leaf node is the empty list.
+The resolution of a blank intermediate node is the result of concatenating the resolution of its left child with the resolution of its right child, in that order.
+        */
+    }
 
     static buildFromLeaves(leaves: LeafNode[]) {
         const width = ArrayTree.width(leaves.length);

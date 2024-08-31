@@ -112,13 +112,13 @@ function IsSender(object: unknown): object is Sender {
 
 function EncodeSender(sender: Sender): Uint8Array {
     const encoder = new Encoder();
-    encoder.writeUint8(new Uint8(sender.sender_type));
+    encoder.writeUint(new Uint8(sender.sender_type));
     const isSenderOrExternal = IsSenderMember(sender) || IsSenderExternal(sender);
     if (isSenderOrExternal) {
         if (IsSenderMember(sender)) {
-            encoder.writeUint32(sender.leaf_index);
+            encoder.writeUint(sender.leaf_index);
         } else {
-            encoder.writeUint32(sender.sender_index);
+            encoder.writeUint(sender.sender_index);
         }
     }
     return new Uint8Array(encoder.flush());
@@ -251,9 +251,9 @@ function IsFramedContent(object: unknown): object is FramedContent {
 function EncodeFramedContent(content: FramedContent) {
     const encoder = new Encoder();
     encoder.writeUint8Array(content.group_id);
-    encoder.writeUint64(content.epoch);
-    encoder.writeUint8Array(EncodeSender(content.sender));
-    encoder.writeUint8(Uint8.from(content.content_type));
+    encoder.writeUint(content.epoch);
+    encoder.writeUint8Array(EncodeSender(content.sender), false);
+    encoder.writeUint(Uint8.from(content.content_type));
     encoder.writeUint8Array(content.authenticated_data)
     if (IsFramedContentApplication(content)) {
         encoder.writeUint8Array(content.application_data);
@@ -271,14 +271,14 @@ function EncodeFramedContent(content: FramedContent) {
  */
 function ConstructFramedContentSignatureData(version: ProtocolVersion, wireFormat: WireFormat, content: FramedContent, context: GroupContext) {
     const encoder = new Encoder();
-    encoder.writeUint16(Uint16.from(version));
-    encoder.writeUint16(Uint16.from(wireFormat));
-    encoder.writeUint8Array(EncodeFramedContent(content));
-    if(content.sender.sender_type === SenderType.member || content.sender.sender_type === SenderType.new_member_commit) {
-        if(context == null) {
+    encoder.writeUint(Uint16.from(version));
+    encoder.writeUint(Uint16.from(wireFormat));
+    encoder.writeUint8Array(EncodeFramedContent(content), false);
+    if (content.sender.sender_type === SenderType.member || content.sender.sender_type === SenderType.new_member_commit) {
+        if (context == null) {
             throw new Error("Group context is missing");
         }
-        encoder.writeUint8Array(EncodeGroupContext(context));
+        encoder.writeUint8Array(EncodeGroupContext(context), false);
     }
     return encoder.flush();
 }
@@ -353,9 +353,9 @@ function IsAuthenticatedContent(object: unknown): object is AuthenticatedContent
 
 function EncodeAuthenticatedContent(content: AuthenticatedContent) {
     const encoder = new Encoder();
-    encoder.writeUint16(Uint16.from(content.wire_format));
-    encoder.writeUint8Array(EncodeFramedContent(content.content));
-    encoder.writeUint8Array(EncodeFramedContentAuthData(content.auth, content.content.content_type));
+    encoder.writeUint(Uint16.from(content.wire_format));
+    encoder.writeUint8Array(EncodeFramedContent(content.content), false);
+    encoder.writeUint8Array(EncodeFramedContentAuthData(content.auth, content.content.content_type), false);
     return encoder.flush();
 }
 

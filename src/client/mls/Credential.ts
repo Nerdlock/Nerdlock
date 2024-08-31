@@ -83,13 +83,13 @@ function IsCredential(object: unknown): object is Certificate {
 
 function EncodeCredential(credential: Credential) {
     const encoder = new Encoder();
-    encoder.writeUint16(Uint16.from(credential.credential_type));
+    encoder.writeUint(Uint16.from(credential.credential_type));
     if (IsCredentialBasic(credential)) {
         encoder.writeUint8Array(credential.identity);
     }
     if (IsCredentialX509(credential)) {
         // write a uint8 for the number of credentials
-        encoder.writeUint8(Uint8.from(credential.credentials.length));
+        encoder.writeUint(Uint8.from(credential.credentials.length));
         credential.credentials.forEach((c) => encoder.writeUint8Array(c.cert_data));
     }
     return encoder.flush();

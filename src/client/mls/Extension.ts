@@ -64,17 +64,17 @@ function IsExtension<T extends ExtensionType>(object: unknown, extensionType: T)
 
 function EncodeExtension(extension: Extension<ExtensionType>) {
     const encoder = new Encoder();
-    encoder.writeUint16(Uint16.from(extension.extension_type));
+    encoder.writeUint(Uint16.from(extension.extension_type));
     if (IsExtensionData(extension.extension_data, ExtensionType.required_capabilities)) {
         const extension_typesLength = extension.extension_data.extension_types.length;
-        encoder.writeUint16(Uint16.from(extension_typesLength));
-        extension.extension_data.extension_types.forEach((v) => encoder.writeUint16(Uint16.from(v)));
+        encoder.writeUint(Uint16.from(extension_typesLength));
+        extension.extension_data.extension_types.forEach((v) => encoder.writeUint(Uint16.from(v)));
         const proposal_typesLength = extension.extension_data.proposal_types.length;
-        encoder.writeUint16(Uint16.from(proposal_typesLength));
-        extension.extension_data.proposal_types.forEach((v) => encoder.writeUint16(Uint16.from(v)));
+        encoder.writeUint(Uint16.from(proposal_typesLength));
+        extension.extension_data.proposal_types.forEach((v) => encoder.writeUint(Uint16.from(v)));
         const credential_typesLength = extension.extension_data.credential_types.length;
-        encoder.writeUint16(Uint16.from(credential_typesLength));
-        extension.extension_data.credential_types.forEach((v) => encoder.writeUint16(Uint16.from(v)));
+        encoder.writeUint(Uint16.from(credential_typesLength));
+        extension.extension_data.credential_types.forEach((v) => encoder.writeUint(Uint16.from(v)));
     }
     return encoder.flush();
 }

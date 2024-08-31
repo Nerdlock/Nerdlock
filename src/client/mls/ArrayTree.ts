@@ -67,12 +67,8 @@ export default class ArrayTree<T> {
         return k;
     }
 
-    get leafCount() {
-        const length = this.#nodes.length;
-        if (length === 0) {
-            return 0;
-        }
-        return (length >> 1) + 1;
+    get nodeCount() {
+        return this.#nodes.length;
     }
 
     /**
@@ -136,6 +132,11 @@ export default class ArrayTree<T> {
         }
     }
 
+    /**
+     * Gets the direct path from the node to the root.
+     * @param node The node to get the direct path of.
+     * @returns The direct path from the node to the root.
+     */
     directPath(node: IndexedType<T>) {
         const root = this.root;
         if (node.index === root.index) {
@@ -208,14 +209,30 @@ export default class ArrayTree<T> {
         return leaves;
     }
 
-    resolution(node: IndexedType<T>) {
-        /*
-        The resolution of a node is an ordered list of non-blank nodes that collectively cover all non-blank descendants of the node. The resolution of the root contains the set of keys that are collectively necessary to encrypt to every node in the group. The resolution of a node is effectively a depth-first, left-first enumeration of the nearest non-blank nodes below the node:
+    get firstEmptyLeaf() {
+        let current = 0;
+        while (current < this.#nodes.length) {
+            const leaf = this.getIndexedNode(current);
+            if (leaf.data == null) {
+                return leaf;
+            }
+            current += 2;
+        }
+        return undefined;
+    }
 
-The resolution of a non-blank node comprises the node itself, followed by its list of unmerged leaves, if any.
-The resolution of a blank leaf node is the empty list.
-The resolution of a blank intermediate node is the result of concatenating the resolution of its left child with the resolution of its right child, in that order.
-        */
+    extend() {
+        // extend the tree by N + 1 blank values where N is the number of nodes
+        const newNodes = this.nodeCount + 1;
+        for (let i = 0; i < newNodes; i++) {
+            this.setNode(i, undefined);
+        }
+    }
+
+    truncate() {
+        // truncate the tree to its first (N-1) / 2 nodes
+        const newNodes = this.nodeCount - 1;
+        this.#nodes.length = newNodes;
     }
 
     /**

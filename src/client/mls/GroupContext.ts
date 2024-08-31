@@ -40,14 +40,14 @@ function IsGroupContext(object: unknown): object is GroupContext {
 
 function EncodeGroupContext(context: GroupContext) {
     const encoder = new Encoder();
-    encoder.writeUint16(Uint16.from(ProtocolVersion.mls10));
-    encoder.writeUint16(Uint16.from(context.cipher_suite));
+    encoder.writeUint(Uint16.from(ProtocolVersion.mls10));
+    encoder.writeUint(Uint16.from(context.cipher_suite));
     encoder.writeUint8Array(context.group_id);
-    encoder.writeUint64(context.epoch);
+    encoder.writeUint(context.epoch);
     encoder.writeUint8Array(context.tree_hash);
     encoder.writeUint8Array(context.confirmed_transcript_hash);
-    encoder.writeUint16(Uint16.from(context.extensions.length));
-    context.extensions.forEach((e) => encoder.writeUint8Array(EncodeExtension(e)));
+    encoder.writeUint(Uint16.from(context.extensions.length));
+    context.extensions.forEach((e) => encoder.writeUint8Array(EncodeExtension(e), false));
     return encoder.flush();
 }
 

@@ -5,6 +5,8 @@ import InvalidObjectError from "./errors/InvalidObjectError";
 import type { Extension } from "./Extension";
 import { EncodeGroupContext, type GroupContext } from "./GroupContext";
 import { ConstructKeyPackageSignatureData, type KeyPackage } from "./messages/KeyPackage";
+import type { AddProposal } from "./proposals/Add";
+import type { UpdateProposal } from "./proposals/Update";
 import RatchetTree from "./RatchetTree";
 import { ConstructLeafNodeSignatureData, GetDefaultCapabilities, type LeafNode } from "./RatchetTree";
 import type Uint32 from "./types/Uint32";
@@ -49,7 +51,7 @@ class Group {
         return true;
     }
 
-    async validateLeafNode(node: LeafNode, source: LeafNodeSource, leaf_index?: Uint32) {
+    async validateLeafNode(node: LeafNode, source: LeafNodeSource, leaf_index?: Uint32, prev_leaf_node?: LeafNode) {
         const groupContext = this.#groupContext;
         const groupLeaves = this.#ratchetTree.leaves;
         const cipherSuite = groupContext.cipher_suite;
@@ -84,7 +86,7 @@ class Group {
                 throw new InvalidObjectError("Credential type not supported by a group member");
             }
         }
-        // verify lifetime
+        // according to MLS protocol, it is only recommended to verify the lifetime of the leaf node, so screw it, we ain't doing it L
         // verify that the leaf node's extensions are in the capabilities.extensions
         if (!node.extensions.every((e) => node.capabilities.extensions.includes(e.extension_type))) {
             throw new InvalidObjectError("Extension type not found in capabilities");
@@ -92,6 +94,15 @@ class Group {
         // verify the leaf_node_source matches the source
         if (node.leaf_node_source !== source) {
             throw new InvalidObjectError("Leaf node source does not match the source");
+        }
+        // if this is coming from an update proposal, verify that thew new encryption_key iis different than the previous one
+        if(source === LeafNodeSource.update) {
+            if(prev_leaf_node == null) {
+                throw new Error("Previous leaf node is missing");
+            }
+            if(ArraysEqual(prev_leaf_node.encryption_key, node.encryption_key)) {
+                throw new InvalidObjectError("Encryption key is the same as the previous one");
+            }
         }
         // verify that signature_key and encryption_key is unique amongst the group
         const uniqueKeys = new Array<Uint8Array>();
@@ -103,6 +114,33 @@ class Group {
             throw new InvalidObjectError("Signature key or encryption key is not unique");
         }
         return true;
+    }
+
+    async processAddProposal(proposal: AddProposal) {
+        // the proposal is only valid, if the key_package is valid
+        const keyPackageValid = await this.validateKeyPackage(proposal.key_package).catch(() => false);
+        if(!keyPackageValid) {
+            throw new InvalidObjectError("Key package is not valid");
+        }
+        // add the new leaf node to the tree
+        this.#ratchetTree.addLeaf(proposal.key_package.leaf_node);
+    }
+
+    async processUpdateProposal(proposal: UpdateProposal, prevLeafNode: LeafNode, leaf_index: Uint32) {
+        // the proposal is only valid, if the leaf_node is valid
+        const leafNodeValid = await this.validateLeafNode(proposal.leaf_node, LeafNodeSource.update, leaf_index, prevLeafNode).catch(() => false);
+        if(!leafNodeValid) {
+            throw new InvalidObjectError("Leaf node is not valid");
+        }
+        // update the leaf node in the tree
+        this.#ratchetTree.setNode(leaf_index.value, proposal.leaf_node);
+        // go through every intermediate node and blank it
+        const nodes = this.#ratchetTree.directPath(this.#ratchetTree.getIndexedNode(leaf_index.value));
+        // pop the last node (the node)
+        nodes.pop();
+        for(const node of nodes) {
+            this.#ratchetTree.setNode(node.index, undefined);
+        }
     }
 
     static async create(signatureKeyPub: Uint8Array, signatureKeyPriv: Uint8Array, credential: Credential, clientExtensions: Extension<ExtensionType.application_id>[], groupExtensions: Extension<ExtensionType.required_capabilities>[], cipherSuite: CipherSuiteType) {
