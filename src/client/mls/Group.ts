@@ -14,13 +14,14 @@ import {
 import type { AddProposal } from "./proposals/Add";
 import type { UpdateProposal } from "./proposals/Update";
 import RatchetTree, { ConstructLeafNodeSignatureData, GenerateLeafNode, type LeafNode } from "./RatchetTree";
-import type Uint32 from "./types/Uint32";
+import Uint32 from "./types/Uint32";
 import Uint64 from "./types/Uint64";
 
 class Group {
     #ratchetTree: RatchetTree;
     #groupContext: GroupContext;
     #keySchedule: KeySchedule;
+    #ourIndex: Uint32 = Uint32.from(0);
 
     constructor(ratchetTree: RatchetTree, groupContext: GroupContext, keySchedule: KeySchedule) {
         this.#ratchetTree = ratchetTree;
@@ -166,6 +167,18 @@ class Group {
         }
     }
 
+    // async createProposal(proposal: Proposal) {
+    //     // construct a framed content
+    //     const framedContent = {
+    //         group_id: this.#groupContext.group_id,
+    //         epoch: this.#groupContext.epoch,
+    //         sender: {
+    //             sender_type: SenderType.member,
+    //             leaf_index: this.#ourIndex
+    //         },
+    //     } satisfies FramedContent;
+    // }
+
     /**
      * Create a new group with the given parameters.
      * After the group is created, the DS will be contacted and the function will fail if the DS rejects the group.
@@ -205,6 +218,7 @@ class Group {
         const epochSecret = crypto.getRandomValues(new Uint8Array(suite.kdf.hashSize));
         const keySchedule = await KeySchedule.fromEpochSecret(epochSecret, cipherSuite);
         const group = new Group(ratchetTree, groupContext, keySchedule);
+        group.#ourIndex = Uint32.from(0);
         // construct the confirmation_tag
         const confirmation_key = keySchedule.getSecret("confirmation_key");
         if (confirmation_key == null) {

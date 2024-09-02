@@ -1,4 +1,5 @@
 import { concatBytes } from "@noble/hashes/utils";
+import type ArrayTree from "./ArrayTree";
 import { DeriveSecret, Hash } from "./CryptoHelper";
 import type { CipherSuiteType } from "./Enums";
 
@@ -20,6 +21,8 @@ export default class KeySchedule {
     #cipherSuite: CipherSuiteType;
     #secrets: Record<EpochSecretType, Uint8Array | undefined>;
     #interim_transcript_hash: Uint8Array | undefined;
+    #secretTree: ArrayTree<Uint8Array>;
+    #ratchetSecrets: Record<number, { handshake: Uint8Array; application: Uint8Array }>;
 
     constructor(secret: Uint8Array, cipherSuite: CipherSuiteType) {
         this.#epochSecret = secret;

@@ -1,6 +1,7 @@
 import type { Commit } from "./Commit";
+import { SignWithLabel } from "./CryptoHelper";
 import { Decoder, Encoder } from "./Encoding";
-import { ContentType, ProtocolVersion, SenderType, WireFormat } from "./Enums";
+import { CipherSuiteType, ContentType, ProtocolVersion, SenderType, WireFormat } from "./Enums";
 import MalformedObjectError from "./errors/MalformedObjectError";
 import { EncodeGroupContext, type GroupContext } from "./GroupContext";
 import { IsGroupInfo, type GroupInfo } from "./messages/GroupInfo";
@@ -125,7 +126,7 @@ export {
     IsSenderNewMemberCommit,
     IsSenderNewMemberProposal
 };
-export type { Sender };
+export type { Sender, SenderMember };
 
 interface FramedContentBase {
     group_id: Uint8Array;
@@ -232,7 +233,7 @@ function ConstructFramedContentSignatureData(
     version: ProtocolVersion,
     wireFormat: WireFormat,
     content: FramedContent,
-    context: GroupContext
+    context?: GroupContext
 ) {
     const encoder = new Encoder();
     encoder.writeUint(Uint16.from(version));
@@ -247,8 +248,71 @@ function ConstructFramedContentSignatureData(
     return encoder.flush();
 }
 
-export { ConstructFramedContentSignatureData, IsFramedContent, IsFramedContentApplication, IsFramedContentCommit, IsFramedContentProposal };
-export type { FramedContent };
+// note from Mester: could have the following code been made better? yes. will it? no, lol
+
+interface ConstructAuthenticatedFramedContentParamsBase {
+    group_id: Uint8Array;
+    epoch: Uint64;
+    sender: Sender;
+    authenticated_data: Uint8Array;
+    wire_format: WireFormat;
+    group_context?: GroupContext;
+    signature_key: Uint8Array;
+    cipher_suite: CipherSuiteType;
+}
+
+interface ConstructAuthenticatedFramedContentParamsApplication extends ConstructAuthenticatedFramedContentParamsBase {
+    application_data: Uint8Array;
+}
+async function ConstructAuthenticatedFramedContentApplication(params: ConstructAuthenticatedFramedContentParamsApplication) {
+    const { group_id, epoch, sender, authenticated_data, application_data, wire_format, group_context, signature_key, cipher_suite } = params;
+    // first construct the framed content
+    const framedContent = {
+        group_id,
+        epoch,
+        sender,
+        content_type: ContentType.application,
+        authenticated_data,
+        application_data
+    } satisfies FramedContentApplication;
+    // now calculate the signature
+    const signatureData = ConstructFramedContentSignatureData(ProtocolVersion.mls10, wire_format, framedContent, group_context);
+    const signature = await SignWithLabel(signature_key, new TextEncoder().encode("FramedContentTBS"), signatureData, cipher_suite);
+    return {
+        framedContent,
+        framedContentAuthData: {
+            signature
+        } satisfies FramedContentAuthDataBase
+    }
+}
+
+interface ConstructAuthenticatedFramedContentParamsProposal extends ConstructAuthenticatedFramedContentParamsBase {
+    proposal: Proposal;
+}
+async function ConstructAuthenticatedFramedContentProposal(params: ConstructAuthenticatedFramedContentParamsProposal) {
+    const { group_id, epoch, sender, authenticated_data, proposal, wire_format, group_context, signature_key, cipher_suite } = params;
+    // first construct the framed content
+    const framedContent = {
+        group_id,
+        epoch,
+        sender,
+        content_type: ContentType.proposal,
+        authenticated_data,
+        proposal
+    } satisfies FramedContentProposal;
+    // now calculate the signature
+    const signatureData = ConstructFramedContentSignatureData(ProtocolVersion.mls10, wire_format, framedContent, group_context);
+    const signature = await SignWithLabel(signature_key, new TextEncoder().encode("FramedContentTBS"), signatureData, cipher_suite);
+    return {
+        framedContent,
+        framedContentAuthData: {
+            signature
+        } satisfies FramedContentAuthDataBase
+    }
+}
+
+export { ConstructAuthenticatedFramedContentApplication, ConstructAuthenticatedFramedContentProposal, IsFramedContent, IsFramedContentApplication, IsFramedContentCommit, IsFramedContentProposal };
+export type { ConstructAuthenticatedFramedContentParamsBase, FramedContent };
 
 interface FramedContentAuthDataBase {
     signature: Uint8Array;
@@ -284,7 +348,7 @@ function EncodeFramedContentAuthData(auth: FramedContentAuthData, contentType: C
     return encoder.flush();
 }
 
-export { IsFramedContentAuthData };
+export { EncodeFramedContentAuthData, IsFramedContentAuthData };
 export type { FramedContentAuthData };
 
 interface AuthenticatedContent {
@@ -438,3 +502,4 @@ function IsMLSMessage(object: unknown): object is MLSMessage {
 
 export { IsMLSMessage, IsMLSMessageGroupInfo, IsMLSMessageKeyPackage, IsMLSMessagePrivate, IsMLSMessagePublic, IsMLSMessageWelcome };
 export type { MLSMessage };
+
