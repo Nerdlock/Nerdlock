@@ -1,16 +1,15 @@
+import type { Commit } from "./Commit";
 import type { Credential } from "./Credential";
 import { ArraysEqual, DecodeCipherSuiteType, GenerateSigningKeyPair, MAC, VerifyWithLabel } from "./CryptoHelper";
-import { CipherSuiteType, CredentialType, ExtensionType, LeafNodeSource, ProtocolVersion } from "./Enums";
+import { CipherSuiteType, CredentialType, ExtensionType, LeafNodeSource, ProtocolVersion, SenderType, WireFormat } from "./Enums";
 import InvalidObjectError from "./errors/InvalidObjectError";
 import type { Extension } from "./Extension";
 import { type GroupContext } from "./GroupContext";
 import KeySchedule from "./KeySchedule";
-import {
-    ConstructKeyPackageSignatureData,
-    EncodeKeyPackage,
-    GenerateKeyPackage,
-    type KeyPackage
-} from "./messages/KeyPackage";
+import { EncodeMLSMessage } from "./Message";
+import { ConstructKeyPackageSignatureData, type KeyPackage } from "./messages/KeyPackage";
+import { EncryptPrivateMessage } from "./messages/PrivateMessage";
+import type { Proposal } from "./Proposal";
 import type { AddProposal } from "./proposals/Add";
 import type { UpdateProposal } from "./proposals/Update";
 import RatchetTree, { ConstructLeafNodeSignatureData, GenerateLeafNode, type LeafNode } from "./RatchetTree";
@@ -21,12 +20,39 @@ class Group {
     #ratchetTree: RatchetTree;
     #groupContext: GroupContext;
     #keySchedule: KeySchedule;
-    #ourIndex: Uint32 = Uint32.from(0);
+    #leafIndex: Uint32 = Uint32.from(0);
 
     constructor(ratchetTree: RatchetTree, groupContext: GroupContext, keySchedule: KeySchedule) {
         this.#ratchetTree = ratchetTree;
         this.#groupContext = groupContext;
         this.#keySchedule = keySchedule;
+    }
+
+    async sendMessage(message: Uint8Array | Proposal | Commit, signature_key: Uint8Array) {
+        const type = message instanceof Uint8Array ? "application" : "handshake";
+        const { key, nonce, generation } = await this.#keySchedule.getMessageSecret(this.#leafIndex, type);
+        const sender_data_secret = this.#keySchedule.getSecret("sender_data_secret");
+        if (sender_data_secret == null) {
+            throw new Error("Sender data secret not set");
+        }
+        return EncryptPrivateMessage({
+            group_id: this.#groupContext.group_id,
+            epoch: this.#groupContext.epoch,
+            authenticated_data: new Uint8Array(0),
+            cipher_suite: this.#groupContext.cipher_suite,
+            sender: {
+                sender_type: SenderType.member,
+                leaf_index: this.#leafIndex
+            },
+            content: message,
+            wire_format: WireFormat.mls_private_message,
+            group_context: this.#groupContext,
+            generation,
+            nonce,
+            key,
+            sender_data_secret,
+            signature_key
+        });
     }
 
     async validateKeyPackage(keyPackage: KeyPackage) {
@@ -117,7 +143,7 @@ class Group {
         if (node.leaf_node_source !== source) {
             throw new InvalidObjectError("Leaf node source does not match the source");
         }
-        // if this is coming from an update proposal, verify that thew new encryption_key iis different than the previous one
+        // if this is coming from an update proposal, verify that thew new encryption_key is different than the previous one
         if (source === LeafNodeSource.update) {
             if (prev_leaf_node == null) {
                 throw new Error("Previous leaf node is missing");
@@ -216,9 +242,9 @@ class Group {
         } satisfies GroupContext;
         // construct the key schedule
         const epochSecret = crypto.getRandomValues(new Uint8Array(suite.kdf.hashSize));
-        const keySchedule = await KeySchedule.fromEpochSecret(epochSecret, cipherSuite);
+        const keySchedule = await KeySchedule.fromEpochSecret(epochSecret, cipherSuite, 1);
         const group = new Group(ratchetTree, groupContext, keySchedule);
-        group.#ourIndex = Uint32.from(0);
+        group.#leafIndex = Uint32.from(0);
         // construct the confirmation_tag
         const confirmation_key = keySchedule.getSecret("confirmation_key");
         if (confirmation_key == null) {
@@ -268,17 +294,8 @@ const { group, nodePrivateKey: nodePrivateKeyAlice } = await Group.create(
     [],
     cipherSuite
 );
-const signingKeyPairBob = await GenerateSigningKeyPair(cipherSuite);
-const credentialBob = {
-    credential_type: CredentialType.basic,
-    identity: new TextEncoder().encode("testBob")
-} satisfies Credential;
-const { keyPackage: keyPackageBob } = await GenerateKeyPackage({
-    cipherSuite,
-    signingKeyPriv: signingKeyPairBob.privateKey,
-    signingKeyPub: signingKeyPairBob.publicKey,
-    credential: credentialBob,
-    extensions: [],
-    validFor: 86400n
-});
-const encoded = EncodeKeyPackage(keyPackageBob);
+const messageRaw = new Uint8Array([0xde, 0xad, 0xbe, 0xef]);
+const message1 = await group.sendMessage(messageRaw, signingKeyPairAlice.privateKey);
+const message2 = await group.sendMessage(messageRaw, signingKeyPairAlice.privateKey);
+console.log(EncodeMLSMessage(message1));
+console.log(EncodeMLSMessage(message2));

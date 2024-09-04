@@ -3,5 +3,5 @@
     "compilerOptions": {
         "lib": ["ESNext"]
     },
-    "include": ["**/*.ts","../NerdClient.ts"],
+    "include": ["**/*.ts","../nerdclient/NerdClient.ts"],
 }

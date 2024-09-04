@@ -1,7 +1,8 @@
 import { concatBytes } from "@noble/hashes/utils";
-import type ArrayTree from "./ArrayTree";
 import { DeriveSecret, Hash } from "./CryptoHelper";
 import type { CipherSuiteType } from "./Enums";
+import SecretTree, { type MessageSecret } from "./SecretTree";
+import type Uint32 from "./types/Uint32";
 
 type EpochSecretType =
     | "sender_data_secret"
@@ -21,8 +22,7 @@ export default class KeySchedule {
     #cipherSuite: CipherSuiteType;
     #secrets: Record<EpochSecretType, Uint8Array | undefined>;
     #interim_transcript_hash: Uint8Array | undefined;
-    #secretTree: ArrayTree<Uint8Array>;
-    #ratchetSecrets: Record<number, { handshake: Uint8Array; application: Uint8Array }>;
+    #secretTree: SecretTree;
 
     constructor(secret: Uint8Array, cipherSuite: CipherSuiteType) {
         this.#epochSecret = secret;
@@ -37,8 +37,31 @@ export default class KeySchedule {
             resumption_psk: undefined,
             epoch_authenticator: undefined
         };
+        this.#secretTree = new SecretTree(0, cipherSuite);
     }
 
+    get interim_transcript_hash() {
+        return this.#interim_transcript_hash;
+    }
+
+    getSecret(type: EpochSecretType) {
+        return this.#secrets[type];
+    }
+
+    async getMessageSecret(index: Uint32, type: "handshake" | "application", until?: Uint32) {
+        const secrets = await this.#secretTree.getMessageSecret(
+            this.#secretTree.getIndexedNode(index.value),
+            type,
+            this.#cipherSuite,
+            until
+        );
+        if (Array.isArray(secrets)) {
+            // TODO: find a way to store the secrets for the unused generatiions in case of an out-of-order message
+            return secrets.at(-1) as MessageSecret;
+        } else {
+            return secrets;
+        }
+    }
     async #computeEpochSecret() {
         if (this.#epochSecret == null) {
             throw new Error("Epoch secret not set");
@@ -69,21 +92,19 @@ export default class KeySchedule {
         this.#epochSecret = undefined;
     }
 
-    getSecret(type: EpochSecretType) {
-        return this.#secrets[type];
-    }
-
-    static async fromEpochSecret(secret: Uint8Array, cipherSuite: CipherSuiteType) {
-        const schedule = new KeySchedule(secret, cipherSuite);
-        await schedule.#computeEpochSecret();
-        return schedule;
-    }
-
     async computeInterimTranscriptHash(confirmed_transcript_hash: Uint8Array, confirmation_tag: Uint8Array) {
         this.#interim_transcript_hash = await Hash(concatBytes(confirmed_transcript_hash, confirmation_tag), this.#cipherSuite);
     }
 
-    get interim_transcript_hash() {
-        return this.#interim_transcript_hash;
+    async #computeSecretTree(leafCount: number) {
+        this.#secretTree = SecretTree.fromLength(leafCount, this.#cipherSuite);
+        this.#secretTree.setNode(this.#secretTree.root.index, this.#secrets.encryption_secret);
+    }
+
+    static async fromEpochSecret(secret: Uint8Array, cipherSuite: CipherSuiteType, leafCount: number) {
+        const schedule = new KeySchedule(secret, cipherSuite);
+        await schedule.#computeEpochSecret();
+        await schedule.#computeSecretTree(leafCount);
+        return schedule;
     }
 }

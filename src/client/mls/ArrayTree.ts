@@ -42,11 +42,40 @@ type IndexedTypeWithData<T> = IndexedType<T> & { data: T };
 export type { IndexedType };
 
 /**
- * A binary-tree structure implemented as an array-based tree for the MLS ratchet tree.
+ * A binary-tree structure implemented as an array-based tree for various MLS tree structures.
  * Undefined values represent a blank node.
  */
 export default class ArrayTree<T> {
     #nodes = new Array<T | undefined>();
+
+    constructor(leafCount: number) {
+        validateNumber(leafCount);
+        // get the largest power of 2 that is greater than or equal to the leafCount
+        leafCount = log2(leafCount) + 1;
+        const length = ArrayTree.width(leafCount);
+        this.#nodes = new Array<T | undefined>(length);
+    }
+
+    get nodeCount() {
+        return this.#nodes.length;
+    }
+
+    get leafCount() {
+        return ((this.nodeCount - 1) >> 1) + 1;
+    }
+
+    /**
+     * Get the root node of the tree.
+     * @returns The root node of the tree.
+     */
+    get root() {
+        const rootIndex = (1 << log2(this.#nodes.length)) - 1;
+        const root = this.getIndexedNode(rootIndex);
+        if (root === undefined) {
+            throw new Error("Root not found");
+        }
+        return root;
+    }
 
     /**
      * The level of a node in the tree. Leaves are level 0, their parents
@@ -65,23 +94,6 @@ export default class ArrayTree<T> {
             k++;
         }
         return k;
-    }
-
-    get nodeCount() {
-        return this.#nodes.length;
-    }
-
-    /**
-     * Get the root node of the tree.
-     * @returns The root node of the tree.
-     */
-    get root() {
-        const rootIndex = (1 << log2(this.#nodes.length)) - 1;
-        const root = this.getIndexedNode(rootIndex);
-        if (root === undefined) {
-            throw new Error("Root not found");
-        }
-        return root;
     }
 
     /**
@@ -223,15 +235,16 @@ export default class ArrayTree<T> {
 
     extend() {
         // extend the tree by N + 1 blank values where N is the number of nodes
-        const newNodes = this.nodeCount + 1;
-        for (let i = 0; i < newNodes; i++) {
+        const newNodesLength = this.nodeCount + 1;
+        this.#nodes.length = newNodesLength;
+        for (let i = 0; i < newNodesLength; i++) {
             this.setNode(i, undefined);
         }
     }
 
     truncate() {
         // truncate the tree to its first (N-1) / 2 nodes
-        const newNodes = this.nodeCount - 1;
+        const newNodes = (this.nodeCount - 1) >> 1;
         this.#nodes.length = newNodes;
     }
 
@@ -258,19 +271,26 @@ export default class ArrayTree<T> {
     }
 
     setNode(index: number, node: T | undefined) {
+        if (index < 0 || index >= this.#nodes.length) {
+            throw new Error("Invalid node index");
+        }
         this.#nodes[index] = node;
     }
 
     /**
      * Get the number of nodes needed to represent a tree with the given number of leaves.
-     * @param n The number of leaves in a tree.
+     * @param leafCount The number of leaves in a tree.
      * @returns The width of the tree.
      */
-    static width(n: number) {
-        validateNumber(n);
-        if (n === 0) {
+    static width(leafCount: number) {
+        validateNumber(leafCount);
+        if (leafCount === 0) {
             return 0;
         }
-        return 2 * (n - 1) + 1;
+        return 2 * (leafCount - 1) + 1;
+    }
+
+    static reverseWidth(nodeCount: number) {
+        return ((nodeCount - 1) >> 1) + 1;
     }
 }

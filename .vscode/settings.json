@@ -1,3 +1,6 @@
 {
-    "editor.defaultFormatter": "biomejs.biome"
+    "editor.defaultFormatter": "biomejs.biome",
+    "[erlang]": {
+        "editor.defaultFormatter": "pgourlain.erlang"
+    }
 }

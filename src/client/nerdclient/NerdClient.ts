@@ -2,7 +2,7 @@ import { Aes256Gcm, CipherSuite, HkdfSha256 } from "@hpke/core";
 import { DhkemX25519HkdfSha256 } from "@hpke/dhkem-x25519";
 import { edwardsToMontgomeryPriv, edwardsToMontgomeryPub } from "@noble/curves/ed25519";
 import * as ed from "@noble/ed25519";
-import "./mls/Group";
+import "../mls/Group";
 /**
  * Entrypoint for the NerdLock client using MLS as the underlying protocol.
  */

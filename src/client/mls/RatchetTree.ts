@@ -448,7 +448,7 @@ The resolution of a blank intermediate node is the result of concatenating the r
 
     static buildFromLeaves(leaves: LeafNode[]) {
         const width = ArrayTree.width(leaves.length);
-        const tree = new RatchetTree();
+        const tree = new RatchetTree(leaves.length);
         for (let i = 0; i < width; i++) {
             if (i % 2 === 0) {
                 const leaf = leaves[i >> 1];
@@ -459,8 +459,9 @@ The resolution of a blank intermediate node is the result of concatenating the r
         }
         return tree;
     }
+
     static buildFromNodes(nodes: RatchetTreeNode[]) {
-        const tree = new RatchetTree();
+        const tree = new RatchetTree(ArrayTree.reverseWidth(nodes.length));
         for (let i = 0; i < nodes.length; i++) {
             tree.setNode(i, nodes[i]);
         }

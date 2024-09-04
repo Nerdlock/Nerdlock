@@ -5,9 +5,9 @@ import { CipherSuiteType, ContentType, ProtocolVersion, SenderType, WireFormat }
 import MalformedObjectError from "./errors/MalformedObjectError";
 import { EncodeGroupContext, type GroupContext } from "./GroupContext";
 import { IsGroupInfo, type GroupInfo } from "./messages/GroupInfo";
-import { IsKeyPackage, type KeyPackage } from "./messages/KeyPackage";
-import { IsPrivateMessage, type PrivateMessage } from "./messages/PrivateMessage";
-import { IsPublicMessage, type PublicMessage } from "./messages/PublicMessage";
+import { EncodeKeyPackage, IsKeyPackage, type KeyPackage } from "./messages/KeyPackage";
+import { EncodePrivateMessage, IsPrivateMessage, type PrivateMessage } from "./messages/PrivateMessage";
+import { EncodePublicMessage, IsPublicMessage, type PublicMessage } from "./messages/PublicMessage";
 import { IsWelcome, type Welcome } from "./messages/Welcome";
 import { IsProposal, type Proposal } from "./Proposal";
 import Uint16 from "./types/Uint16";
@@ -265,7 +265,8 @@ interface ConstructAuthenticatedFramedContentParamsApplication extends Construct
     application_data: Uint8Array;
 }
 async function ConstructAuthenticatedFramedContentApplication(params: ConstructAuthenticatedFramedContentParamsApplication) {
-    const { group_id, epoch, sender, authenticated_data, application_data, wire_format, group_context, signature_key, cipher_suite } = params;
+    const { group_id, epoch, sender, authenticated_data, application_data, wire_format, group_context, signature_key, cipher_suite } =
+        params;
     // first construct the framed content
     const framedContent = {
         group_id,
@@ -283,7 +284,7 @@ async function ConstructAuthenticatedFramedContentApplication(params: ConstructA
         framedContentAuthData: {
             signature
         } satisfies FramedContentAuthDataBase
-    }
+    };
 }
 
 interface ConstructAuthenticatedFramedContentParamsProposal extends ConstructAuthenticatedFramedContentParamsBase {
@@ -308,10 +309,18 @@ async function ConstructAuthenticatedFramedContentProposal(params: ConstructAuth
         framedContentAuthData: {
             signature
         } satisfies FramedContentAuthDataBase
-    }
+    };
 }
 
-export { ConstructAuthenticatedFramedContentApplication, ConstructAuthenticatedFramedContentProposal, IsFramedContent, IsFramedContentApplication, IsFramedContentCommit, IsFramedContentProposal };
+export {
+    ConstructAuthenticatedFramedContentApplication,
+    ConstructAuthenticatedFramedContentProposal,
+    IsFramedContent,
+    IsFramedContentApplication,
+    IsFramedContentCommit,
+    IsFramedContentProposal,
+    EncodeFramedContent
+};
 export type { ConstructAuthenticatedFramedContentParamsBase, FramedContent };
 
 interface FramedContentAuthDataBase {
@@ -500,6 +509,28 @@ function IsMLSMessage(object: unknown): object is MLSMessage {
     );
 }
 
-export { IsMLSMessage, IsMLSMessageGroupInfo, IsMLSMessageKeyPackage, IsMLSMessagePrivate, IsMLSMessagePublic, IsMLSMessageWelcome };
-export type { MLSMessage };
+function EncodeMLSMessage(message: MLSMessage) {
+    const encoder = new Encoder();
+    encoder.writeUint(Uint16.from(message.wire_format));
+    if (IsMLSMessagePublic(message)) {
+        encoder.writeUint8Array(EncodePublicMessage(message.public_message), false);
+    }
+    if (IsMLSMessagePrivate(message)) {
+        encoder.writeUint8Array(EncodePrivateMessage(message.private_message), false);
+    }
+    if (IsMLSMessageKeyPackage(message)) {
+        encoder.writeUint8Array(EncodeKeyPackage(message.key_package), false);
+    }
+    return encoder.flush();
+}
 
+export {
+    IsMLSMessage,
+    IsMLSMessageGroupInfo,
+    IsMLSMessageKeyPackage,
+    IsMLSMessagePrivate,
+    IsMLSMessagePublic,
+    IsMLSMessageWelcome,
+    EncodeMLSMessage
+};
+export type { MLSMessage };

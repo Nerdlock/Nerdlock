@@ -176,3 +176,6 @@ dist
 
 # Build folder
 build
+
+docs/.vitepress/dist
+docs/.vitepress/cache
