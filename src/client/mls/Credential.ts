@@ -2,7 +2,6 @@ import { Decoder, Encoder } from "./Encoding";
 import { CredentialType } from "./Enums";
 import MalformedObjectError from "./errors/MalformedObjectError";
 import Uint16 from "./types/Uint16";
-import Uint8 from "./types/Uint8";
 
 interface Certificate {
     cert_data: Uint8Array;
@@ -85,9 +84,7 @@ function EncodeCredential(credential: Credential) {
         encoder.writeUint8Array(credential.identity);
     }
     if (IsCredentialX509(credential)) {
-        // write a uint8 for the number of credentials
-        encoder.writeUint(Uint8.from(credential.credentials.length));
-        credential.credentials.forEach((c) => encoder.writeUint8Array(c.cert_data));
+        encoder.writeArray(credential.credentials, (c, encoder) => encoder.writeUint8Array(c.cert_data));
     }
     return encoder.flush();
 }
@@ -100,13 +97,11 @@ function DecodeCredential(decoder: Decoder): Credential {
             identity: decoder.readUint8Array()
         } satisfies CredentialBasic;
     } else if (credential_type === CredentialType.x509) {
-        const credentials: Certificate[] = [];
-        const length = decoder.readUint8().value;
-        for (let i = 0; i < length; i++) {
-            credentials.push({
+        const credentials = decoder.readArray((decoder) => {
+            return {
                 cert_data: decoder.readUint8Array()
-            } satisfies Certificate);
-        }
+            } satisfies Certificate;
+        });
         return {
             credential_type: credential_type,
             credentials: credentials
@@ -118,3 +113,4 @@ function DecodeCredential(decoder: Decoder): Credential {
 
 export { DecodeCredential, EncodeCredential, IsCredential, IsCredentialBasic, IsCredentialX509 };
 export type { Credential, CredentialBasic, CredentialX509 };
+

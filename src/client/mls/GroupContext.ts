@@ -35,7 +35,7 @@ function IsGroupContext(object: unknown): object is GroupContext {
         object.confirmed_transcript_hash instanceof Uint8Array &&
         object.extensions instanceof Array &&
         object.extensions.every(
-            (e) => IsExtension(e, ExtensionType.required_capabilities) || IsExtension(e, ExtensionType.external_senders)
+            (e) => IsExtension(e, [ExtensionType.required_capabilities]) || IsExtension(e, [ExtensionType.external_senders])
         )
     );
 }
@@ -48,8 +48,7 @@ function EncodeGroupContext(context: GroupContext) {
     encoder.writeUint(context.epoch);
     encoder.writeUint8Array(context.tree_hash);
     encoder.writeUint8Array(context.confirmed_transcript_hash);
-    encoder.writeUint(Uint16.from(context.extensions.length));
-    context.extensions.forEach((e) => encoder.writeUint8Array(EncodeExtension(e), false));
+    encoder.writeArray(context.extensions, (e, encoder) => encoder.writeUint8Array(EncodeExtension(e), false));
     return encoder.flush();
 }
 

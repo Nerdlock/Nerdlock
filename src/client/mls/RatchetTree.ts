@@ -37,18 +37,14 @@ function EncodeParentNode(node: ParentNode) {
     const encoder = new Encoder();
     encoder.writeUint8Array(node.encryption_key);
     encoder.writeUint8Array(node.parent_hash);
-    encoder.writeUint(Uint32.from(node.unmerged_leaves.length));
-    node.unmerged_leaves.forEach((l) => encoder.writeUint(Uint32.from(l)));
+    encoder.writeArray([...node.unmerged_leaves], (l, encoder) => encoder.writeUint(Uint32.from(l)));
     return encoder.flush();
 }
 
 function DecodeParentNode(decoder: Decoder): ParentNode {
     const encryption_key = decoder.readUint8Array();
     const parent_hash = decoder.readUint8Array();
-    const unmerged_leaves = new Uint32Array(decoder.readUint32().value);
-    for (let i = 0; i < unmerged_leaves.length; i++) {
-        unmerged_leaves[i] = decoder.readUint32().value;
-    }
+    const unmerged_leaves = new Uint32Array(decoder.readArray((decoder) => decoder.readUint32().value));
     return {
         encryption_key,
         parent_hash,
@@ -93,57 +89,31 @@ function IsCapabilities(object: unknown): object is Capabilities {
 
 function EncodeCapabilities(capabilities: Capabilities) {
     const encoder = new Encoder();
-    encoder.writeUint(Uint16.from(capabilities.versions.length));
-    capabilities.versions.forEach((v) => encoder.writeUint(Uint16.from(v)));
-    encoder.writeUint(Uint16.from(capabilities.cipher_suites.length));
-    capabilities.cipher_suites.forEach((v) => encoder.writeUint(Uint16.from(v)));
-    encoder.writeUint(Uint16.from(capabilities.extensions.length));
-    capabilities.extensions.forEach((v) => encoder.writeUint(Uint16.from(v)));
-    encoder.writeUint(Uint16.from(capabilities.proposals.length));
-    capabilities.proposals.forEach((v) => encoder.writeUint(Uint16.from(v)));
-    encoder.writeUint(Uint16.from(capabilities.credentials.length));
-    capabilities.credentials.forEach((v) => encoder.writeUint(Uint16.from(v)));
+    encoder.writeArray(capabilities.versions, (v, encoder) => encoder.writeUint(Uint16.from(v)));
+    encoder.writeArray(capabilities.cipher_suites, (v, encoder) => encoder.writeUint(Uint16.from(v)));
+    encoder.writeArray(capabilities.extensions, (v, encoder) => encoder.writeUint(Uint16.from(v)));
+    encoder.writeArray(capabilities.proposals, (v, encoder) => encoder.writeUint(Uint16.from(v)));
+    encoder.writeArray(capabilities.credentials, (v, encoder) => encoder.writeUint(Uint16.from(v)));
     return encoder.flush();
 }
 
 function DecodeCapabilities(decoder: Decoder): Capabilities {
-    const versions: ProtocolVersion[] = [];
-    const cipher_suites: CipherSuiteType[] = [];
-    const extensions: ExtensionType[] = [];
-    const proposals: ProposalType[] = [];
-    const credentials: CredentialType[] = [];
-    const versionsLength = decoder.readUint16().value;
-    for (let i = 0; i < versionsLength; i++) {
-        const version = decoder.readUint16().value;
-        versions.push(version);
-    }
-    const cipher_suitesLength = decoder.readUint16().value;
-    for (let i = 0; i < cipher_suitesLength; i++) {
-        const cipher_suite = decoder.readUint16().value;
-        cipher_suites.push(cipher_suite);
-    }
-    const extensionsLength = decoder.readUint16().value;
-    for (let i = 0; i < extensionsLength; i++) {
-        const extension = decoder.readUint16().value;
-        extensions.push(extension);
-    }
-    const proposalsLength = decoder.readUint16().value;
-    for (let i = 0; i < proposalsLength; i++) {
-        const proposal = decoder.readUint16().value;
-        proposals.push(proposal);
-    }
-    const credentialsLength = decoder.readUint16().value;
-    for (let i = 0; i < credentialsLength; i++) {
-        const credential = decoder.readUint16().value;
-        credentials.push(credential);
-    }
-    return {
+    const versions = decoder.readArray<ProtocolVersion>((decoder) => decoder.readUint16().value);
+    const cipher_suites = decoder.readArray<CipherSuiteType>((decoder) => decoder.readUint16().value);
+    const extensions = decoder.readArray<ExtensionType>((decoder) => decoder.readUint16().value);
+    const proposals = decoder.readArray<ProposalType>((decoder) => decoder.readUint16().value);
+    const credentials = decoder.readArray<CredentialType>((decoder) => decoder.readUint16().value);
+    const capabilities = {
         versions,
         cipher_suites,
         extensions,
         proposals,
         credentials
     } satisfies Capabilities;
+    if (!IsCapabilities(capabilities)) {
+        throw new InvalidObjectError("Invalid capabilities");
+    }
+    return capabilities;
 }
 
 function GetDefaultCapabilities(): Capabilities {
@@ -274,8 +244,7 @@ function ConstructLeafNodeSignatureData(node: LeafNode, group_id?: Uint8Array, l
     if (IsLeafNodeCommit(node)) {
         encoder.writeUint8Array(node.parent_hash);
     }
-    encoder.writeUint(Uint16.from(node.extensions.length));
-    node.extensions.forEach((e) => encoder.writeUint8Array(EncodeExtension(e), false));
+    encoder.writeArray(node.extensions, (e, encoder) => encoder.writeUint8Array(EncodeExtension(e), false));
     if (node.leaf_node_source === LeafNodeSource.update || node.leaf_node_source === LeafNodeSource.commit) {
         if (group_id == null) {
             throw new EncodeError("Group id is missing");
@@ -306,8 +275,7 @@ function EncodeLeafNode(node: LeafNode) {
     if (IsLeafNodeCommit(node)) {
         encoder.writeUint8Array(node.parent_hash);
     }
-    encoder.writeUint(Uint16.from(node.extensions.length));
-    node.extensions.forEach((e) => encoder.writeUint8Array(EncodeExtension(e), false));
+    encoder.writeArray(node.extensions, (e, encoder) => encoder.writeUint8Array(EncodeExtension(e), false));
     encoder.writeUint8Array(node.signature);
     return encoder.flush();
 }
@@ -326,11 +294,7 @@ function DecodeLeafNode(decoder: Decoder): LeafNode {
     if (leaf_node_source === LeafNodeSource.commit) {
         parent_hash = decoder.readUint8Array();
     }
-    const extensionsLength = decoder.readUint16().value;
-    const extensions: Extension<ExtensionType>[] = [];
-    for (let i = 0; i < extensionsLength; i++) {
-        extensions.push(DecodeExtension(decoder));
-    }
+    const extensions = decoder.readArray((decoder) => DecodeExtension(decoder));
     const signature = decoder.readUint8Array();
     const leaf_node = {
         encryption_key,

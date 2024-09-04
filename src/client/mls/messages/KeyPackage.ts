@@ -52,8 +52,7 @@ function EncodeKeyPackage(keyPackage: KeyPackage) {
     encoder.writeUint(Uint16.from(keyPackage.cipher_suite));
     encoder.writeUint8Array(keyPackage.init_key);
     encoder.writeUint8Array(EncodeLeafNode(keyPackage.leaf_node), false);
-    encoder.writeUint(Uint16.from(keyPackage.extensions.length));
-    keyPackage.extensions.forEach((e) => encoder.writeUint8Array(EncodeExtension(e), false));
+    encoder.writeArray(keyPackage.extensions, (e, encoder) => encoder.writeUint8Array(EncodeExtension(e), false));
     encoder.writeUint8Array(keyPackage.signature);
     return encoder.flush();
 }
@@ -63,11 +62,7 @@ function DecodeKeyPackage(decoder: Decoder): KeyPackage {
     const cipher_suite = decoder.readUint16().value;
     const init_key = decoder.readUint8Array();
     const leaf_node = DecodeLeafNode(decoder);
-    const extensionsLength = decoder.readUint16().value;
-    const extensions: Extension<ExtensionType>[] = [];
-    for (let i = 0; i < extensionsLength; i++) {
-        extensions.push(DecodeExtension(decoder));
-    }
+    const extensions = decoder.readArray((decoder) => DecodeExtension(decoder));
     const signature = decoder.readUint8Array();
     const keyPackage = {
         version,

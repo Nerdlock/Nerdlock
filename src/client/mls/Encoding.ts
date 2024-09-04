@@ -55,6 +55,13 @@ export class Encoder {
         this.#fragments.push(encoded.buffer);
         return this;
     }
+
+    writeArray<T>(array: T[], func: (value: T, encoder: Encoder) => void) {
+        const encoder = new Encoder();
+        array.forEach((value) => func(value, encoder));
+        this.writeUint8Array(encoder.flush());
+        return this;
+    }
 }
 
 export class Decoder {
@@ -109,12 +116,30 @@ export class Decoder {
         return value;
     }
 
+    readArray<T>(func: (decoder: Decoder) => T): T[] {
+        const array = new Array<T>();
+        const decoder = new Decoder(this.readUint8Array());
+        while (true) {
+            array.push(func(decoder));
+            if (decoder.offset >= decoder.data.length) {
+                break;
+            }
+        }
+        return array;
+    }
+
     get offset() {
         return this.#offset;
     }
     get data() {
         return this.#data;
     }
+    get length() {
+        return this.#data.length;
+    }
+    get rest() {
+        return this.#data.subarray(this.#offset);
+    }   
 }
 
 function IsGREASEValue(value: number) {
