@@ -139,7 +139,7 @@ export class Decoder {
     }
     get rest() {
         return this.#data.subarray(this.#offset);
-    }   
+    }
 }
 
 function IsGREASEValue(value: number) {

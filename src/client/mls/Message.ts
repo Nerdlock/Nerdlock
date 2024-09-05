@@ -250,7 +250,27 @@ function ConstructFramedContentSignatureData(
 
 // note from Mester: could have the following code been made better? yes. will it? no, lol
 
-interface ConstructAuthenticatedFramedContentParamsBase {
+interface SignFramedContentParams {
+    framedContent: FramedContent;
+    wire_format: WireFormat;
+    group_context?: GroupContext;
+    signature_key: Uint8Array;
+    cipher_suite: CipherSuiteType;
+}
+
+async function SignFramedContent(params: SignFramedContentParams) {
+    const { framedContent, wire_format, group_context, signature_key, cipher_suite } = params;
+    const signatureData = ConstructFramedContentSignatureData(ProtocolVersion.mls10, wire_format, framedContent, group_context);
+    const signature = await SignWithLabel(signature_key, new TextEncoder().encode("FramedContentTBS"), signatureData, cipher_suite);
+    return {
+        framedContent,
+        framedContentAuthData: {
+            signature
+        } satisfies FramedContentAuthDataBase
+    };
+}
+
+interface ConstructFramedContentParamsBase {
     group_id: Uint8Array;
     epoch: Uint64;
     sender: Sender;
@@ -261,10 +281,10 @@ interface ConstructAuthenticatedFramedContentParamsBase {
     cipher_suite: CipherSuiteType;
 }
 
-interface ConstructAuthenticatedFramedContentParamsApplication extends ConstructAuthenticatedFramedContentParamsBase {
+interface ConstructFramedContentParamsApplication extends ConstructFramedContentParamsBase {
     application_data: Uint8Array;
 }
-async function ConstructAuthenticatedFramedContentApplication(params: ConstructAuthenticatedFramedContentParamsApplication) {
+async function ConstructFramedContentApplication(params: ConstructFramedContentParamsApplication) {
     const { group_id, epoch, sender, authenticated_data, application_data, wire_format, group_context, signature_key, cipher_suite } =
         params;
     // first construct the framed content
@@ -276,21 +296,13 @@ async function ConstructAuthenticatedFramedContentApplication(params: ConstructA
         authenticated_data,
         application_data
     } satisfies FramedContentApplication;
-    // now calculate the signature
-    const signatureData = ConstructFramedContentSignatureData(ProtocolVersion.mls10, wire_format, framedContent, group_context);
-    const signature = await SignWithLabel(signature_key, new TextEncoder().encode("FramedContentTBS"), signatureData, cipher_suite);
-    return {
-        framedContent,
-        framedContentAuthData: {
-            signature
-        } satisfies FramedContentAuthDataBase
-    };
+    return SignFramedContent({ framedContent, wire_format, group_context, signature_key, cipher_suite });
 }
 
-interface ConstructAuthenticatedFramedContentParamsProposal extends ConstructAuthenticatedFramedContentParamsBase {
+interface ConstructFramedContentParamsProposal extends ConstructFramedContentParamsBase {
     proposal: Proposal;
 }
-async function ConstructAuthenticatedFramedContentProposal(params: ConstructAuthenticatedFramedContentParamsProposal) {
+async function ConstructFramedContentProposal(params: ConstructFramedContentParamsProposal) {
     const { group_id, epoch, sender, authenticated_data, proposal, wire_format, group_context, signature_key, cipher_suite } = params;
     // first construct the framed content
     const framedContent = {
@@ -301,27 +313,39 @@ async function ConstructAuthenticatedFramedContentProposal(params: ConstructAuth
         authenticated_data,
         proposal
     } satisfies FramedContentProposal;
-    // now calculate the signature
-    const signatureData = ConstructFramedContentSignatureData(ProtocolVersion.mls10, wire_format, framedContent, group_context);
-    const signature = await SignWithLabel(signature_key, new TextEncoder().encode("FramedContentTBS"), signatureData, cipher_suite);
-    return {
-        framedContent,
-        framedContentAuthData: {
-            signature
-        } satisfies FramedContentAuthDataBase
-    };
+    return SignFramedContent({ framedContent, wire_format, group_context, signature_key, cipher_suite });
+}
+
+interface ConstructFramedContentParamsCommit extends ConstructFramedContentParamsBase {
+    commit: Commit;
+}
+
+async function ConstructFramedContentCommit(params: ConstructFramedContentParamsCommit) {
+    const { group_id, epoch, sender, authenticated_data, commit, wire_format, group_context, signature_key, cipher_suite } =
+        params;
+    // first construct the framed content
+    const framedContent = {
+        group_id,
+        epoch,
+        sender,
+        content_type: ContentType.commit,
+        authenticated_data,
+        commit
+    } satisfies FramedContentCommit;
+    return SignFramedContent({ framedContent, wire_format, group_context, signature_key, cipher_suite });
 }
 
 export {
-    ConstructAuthenticatedFramedContentApplication,
-    ConstructAuthenticatedFramedContentProposal,
+    ConstructFramedContentApplication,
+    ConstructFramedContentProposal,
+    ConstructFramedContentCommit,
     IsFramedContent,
     IsFramedContentApplication,
     IsFramedContentCommit,
     IsFramedContentProposal,
     EncodeFramedContent
 };
-export type { ConstructAuthenticatedFramedContentParamsBase, FramedContent };
+export type { ConstructFramedContentParamsBase, FramedContent };
 
 interface FramedContentAuthDataBase {
     signature: Uint8Array;

@@ -3,10 +3,10 @@ import { DecodeCipherSuiteType, ExpandWithLabel } from "../CryptoHelper";
 import { Encoder } from "../Encoding";
 import { ContentType, ProtocolVersion, WireFormat } from "../Enums";
 import {
-    ConstructAuthenticatedFramedContentApplication,
-    ConstructAuthenticatedFramedContentProposal,
+    ConstructFramedContentApplication,
+    ConstructFramedContentProposal,
     EncodeFramedContentAuthData,
-    type ConstructAuthenticatedFramedContentParamsBase,
+    type ConstructFramedContentParamsBase,
     type FramedContent,
     type FramedContentAuthData,
     type MLSMessage,
@@ -98,7 +98,7 @@ function IsPrivateMessageContent(object: unknown): object is PrivateMessageConte
     return IsPrivateMessageContentApplication(object) || IsPrivateMessageContentProposal(object) || IsPrivateMessageContentCommit(object);
 }
 
-interface EncryptPrivateMessageParams extends ConstructAuthenticatedFramedContentParamsBase {
+interface EncryptPrivateMessageParams extends ConstructFramedContentParamsBase {
     content: Uint8Array | Proposal | Commit;
     key: Uint8Array;
     nonce: Uint8Array;
@@ -117,11 +117,11 @@ async function EncryptPrivateMessage(params: EncryptPrivateMessageParams) {
     let content_type: ContentType | undefined = undefined;
     if (content instanceof Uint8Array) {
         encoder.writeUint8Array(content);
-        framedContentPromise = ConstructAuthenticatedFramedContentApplication({ ...params, application_data: content, wire_format });
+        framedContentPromise = ConstructFramedContentApplication({ ...params, application_data: content, wire_format });
         content_type = ContentType.application;
     } else if (IsProposal(content)) {
         encoder.writeUint8Array(EncodeProposal(content), false);
-        framedContentPromise = ConstructAuthenticatedFramedContentProposal({ ...params, proposal: content, wire_format });
+        framedContentPromise = ConstructFramedContentProposal({ ...params, proposal: content, wire_format });
         content_type = ContentType.proposal;
     }
     // else if (IsPrivateMessageContentCommit(params.content, content_type)) {

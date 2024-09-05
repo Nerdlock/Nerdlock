@@ -371,6 +371,16 @@ async function MAC(key: Uint8Array, data: Uint8Array, cipherSuite: CipherSuiteTy
     return hmac.create(hashFunction, key).update(data).digest();
 }
 
+function DeriveKeyPair(secret: Uint8Array, cipherSuite: CipherSuiteType) {
+    const suite = DecodeCipherSuiteType(cipherSuite);
+    return suite.kem.deriveKeyPair(secret.buffer as ArrayBuffer).then(async kp => {
+        return {
+            privateKey: await suite.kem.serializePrivateKey(kp.privateKey).then(sk => new Uint8Array(sk)),
+            publicKey: await suite.kem.serializePublicKey(kp.publicKey).then(pk => new Uint8Array(pk))
+        }
+    })
+}
+
 export {
     SignWithLabel,
     VerifyWithLabel,
@@ -386,5 +396,6 @@ export {
     GetAllCipherSuites,
     GetCurrentTime,
     GenerateSigningKeyPair,
-    MAC
+    MAC,
+    DeriveKeyPair
 };

@@ -28,9 +28,7 @@ function IsCertificate(object: unknown): object is Certificate {
         typeof object === "object" &&
         object !== null &&
         "cert_data" in object &&
-        object.cert_data instanceof Uint8Array &&
-        // only fields are cert_data
-        Object.keys(object).length === 1
+        object.cert_data instanceof Uint8Array
     );
 }
 
@@ -39,8 +37,7 @@ function IsCredentialBase(object: unknown): object is CredentialBase {
         typeof object === "object" &&
         object !== null &&
         "credential_type" in object &&
-        typeof object.credential_type === "number" &&
-        [CredentialType.basic, CredentialType.x509].includes(object.credential_type)
+        typeof object.credential_type === "number"
     );
 }
 
@@ -52,9 +49,7 @@ function IsCredentialBasic(object: unknown): object is CredentialBasic {
     return (
         object.credential_type === CredentialType.basic &&
         "identity" in object &&
-        object.identity instanceof Uint8Array &&
-        // only fields are credential_type, identity
-        Object.keys(object).length === 2
+        object.identity instanceof Uint8Array
     );
 }
 
@@ -66,10 +61,8 @@ function IsCredentialX509(object: unknown): object is CredentialX509 {
     return (
         object.credential_type === CredentialType.x509 &&
         "credentials" in object &&
-        object.credentials instanceof Array &&
-        object.credentials.every((c) => IsCertificate(c)) &&
-        // only fields are credential_type, credentials
-        Object.keys(object).length === 2
+        Array.isArray(object.credentials) &&
+        object.credentials.every((c) => IsCertificate(c))
     );
 }
 

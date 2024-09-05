@@ -1,11 +1,13 @@
 import ArrayTree, { type IndexedType } from "./ArrayTree";
+import type { UpdatePath, UpdatePathNode } from "./Commit";
 import { DecodeCredential, EncodeCredential, IsCredential, type Credential } from "./Credential";
-import { GenerateKeyPair, GetAllCipherSuites, GetCurrentTime, Hash, SignWithLabel } from "./CryptoHelper";
+import { DecodeCipherSuiteType, DeriveKeyPair, DeriveSecret, EncryptWithLabel, GenerateKeyPair, GetAllCipherSuites, GetCurrentTime, Hash, SignWithLabel } from "./CryptoHelper";
 import { Decoder, Encoder } from "./Encoding";
 import { CredentialType, ExtensionType, LeafNodeSource, ProtocolVersion, type CipherSuiteType, type ProposalType } from "./Enums";
 import EncodeError from "./errors/EncodeError";
 import InvalidObjectError from "./errors/InvalidObjectError";
 import { DecodeExtension, EncodeExtension, IsExtension, type Extension } from "./Extension";
+import { EncodeGroupContext, type GroupContext } from "./GroupContext";
 import Uint16 from "./types/Uint16";
 import Uint32 from "./types/Uint32";
 import Uint64 from "./types/Uint64";
@@ -13,11 +15,12 @@ import Uint8 from "./types/Uint8";
 
 interface TreeNodeBase {
     encryption_key: Uint8Array;
+    private_key?: Uint8Array;
 }
 
 interface ParentNode extends TreeNodeBase {
     parent_hash: Uint8Array;
-    unmerged_leaves: Uint32Array;
+    unmerged_leaves: Array<number>;
 }
 
 function IsParentNode(object: unknown): object is ParentNode {
@@ -29,7 +32,8 @@ function IsParentNode(object: unknown): object is ParentNode {
         "parent_hash" in object &&
         object.parent_hash instanceof Uint8Array &&
         "unmerged_leaves" in object &&
-        object.unmerged_leaves instanceof Uint32Array
+        Array.isArray(object.unmerged_leaves) &&
+        object.unmerged_leaves.every((l) => typeof l === "number")
     );
 }
 
@@ -44,7 +48,7 @@ function EncodeParentNode(node: ParentNode) {
 function DecodeParentNode(decoder: Decoder): ParentNode {
     const encryption_key = decoder.readUint8Array();
     const parent_hash = decoder.readUint8Array();
-    const unmerged_leaves = new Uint32Array(decoder.readArray((decoder) => decoder.readUint32().value));
+    const unmerged_leaves = decoder.readArray((decoder) => decoder.readUint32().value);
     return {
         encryption_key,
         parent_hash,
@@ -165,8 +169,7 @@ function DecodeLifetime(decoder: Decoder): Lifetime {
     return lifetime;
 }
 
-interface LeafNodeBase {
-    encryption_key: Uint8Array;
+interface LeafNodeBase extends TreeNodeBase {
     signature_key: Uint8Array;
     credential: Credential;
     capabilities: Capabilities;
@@ -398,16 +401,189 @@ export default class RatchetTree extends ArrayTree<RatchetTreeNode> {
             throw new Error("No empty leaves after extending???");
         }
         firstEmpty.data = leaf;
+        return firstEmpty;
     }
 
-    resolution(node: IndexedType<RatchetTreeNode>) {
+    resolution(node: IndexedType<RatchetTreeNode>): IndexedType<RatchetTreeNode>[] {
         /*
         The resolution of a node is an ordered list of non-blank nodes that collectively cover all non-blank descendants of the node. The resolution of the root contains the set of keys that are collectively necessary to encrypt to every node in the group. The resolution of a node is effectively a depth-first, left-first enumeration of the nearest non-blank nodes below the node:
 
-The resolution of a non-blank node comprises the node itself, followed by its list of unmerged leaves, if any.
-The resolution of a blank leaf node is the empty list.
-The resolution of a blank intermediate node is the result of concatenating the resolution of its left child with the resolution of its right child, in that order.
+    The resolution of a non-blank node comprises the node itself, followed by its list of unmerged leaves, if any.
+    The resolution of a blank leaf node is the empty list.
+    The resolution of a blank intermediate node is the result of concatenating the resolution of its left child with the resolution of its right child, in that order.
         */
+        if (node.data != null) {
+            if (IsParentNode(node.data)) {
+                return [node, ...[...node.data.unmerged_leaves].map(l => this.getIndexedNode(l))];
+            } else {
+                return [node];
+            }
+        }
+        if (node.index % 2 === 0) {
+            return [];
+        }
+        return [...this.resolution(this.left(node)), ...this.resolution(this.right(node))];
+    }
+
+    filteredDirectPath(node: IndexedType<RatchetTreeNode>) {
+        /*
+        The filtered direct path of a leaf node L is the node's direct path, with any node removed whose child on the copath of L has an empty resolution (keeping in mind that any unmerged leaves of the copath child count toward its resolution). The removed nodes do not need their own key pairs because encrypting to the node's key pair would be equivalent to encrypting to its non-copath child.
+        */
+        const copathWithEmptyResolution = node.copath().filter(n => this.resolution(n).length === 0);
+        return copathWithEmptyResolution.map(n => n.parent());
+    }
+
+    /**
+     * Compute and set the parent hashes for a given node
+     * @param node The starting node
+     * @param cipherSuite The ciphersuite to use
+     */
+    async computeParentHashes(node: IndexedType<RatchetTreeNode>, cipherSuite: CipherSuiteType) {
+        const copath = node.copath();
+        const parentHashNodes = this.filteredDirectPath(node).toReversed();
+        for (let i = 0; i < parentHashNodes.length; i++) {
+            const parentHashNode = parentHashNodes[i];
+            // get the copath child
+            const copathChild = copath.find(c => c.parent().index === parentHashNode.index);
+            if (copathChild == null) {
+                throw new Error("Copath child not found (but should exist)");
+            }
+            const parentHashNodeData = this.assertParentNode(parentHashNode);
+            // create the input for the parent hash
+            const encoder = new Encoder();
+            encoder.writeUint8Array(parentHashNodeData.encryption_key);
+            // don't encode the parent hash if this is the root node
+            if (i !== 0) {
+                // get the parent hash of the above node in this filtered direct path (which is one index below)
+                const nextNode = this.getIndexedNode(parentHashNodes[i - 1].index);
+                const nextNodeData = this.assertParentNode(nextNode);
+                encoder.writeUint8Array(nextNodeData.parent_hash);
+            }
+            // remove the unmerged leaves before hashing the copatch child
+            for (const leaf of parentHashNodeData.unmerged_leaves) {
+                const leafNode = this.getIndexedNode(leaf * 2);
+                const leafNodePath = leafNode.directPath();
+                for (const n of leafNodePath) {
+                    if (n.data == null) {
+                        continue;
+                    }
+                    const nodeData = this.assertParentNode(n);
+                    nodeData.unmerged_leaves = nodeData.unmerged_leaves.filter(l => l !== leaf);
+                    this.setNode(n.index, nodeData);
+                }
+            }
+            encoder.writeUint8Array(await this.hash(copathChild, cipherSuite));
+            const parentHashInput = encoder.flush();
+            const parentHash = await Hash(parentHashInput, cipherSuite);
+            parentHashNodeData.parent_hash = parentHash;
+            this.setNode(parentHashNode.index, parentHashNodeData);
+        };
+    }
+
+    /**
+     * Update the direct path of a given note, and return the UpdatePath object
+     */
+    async updateDirectPath(leafNode: IndexedType<RatchetTreeNode>, groupContext: GroupContext, signature_key: Uint8Array, cipherSuite: CipherSuiteType) {
+        // step 1: blank all nodes in the direct path of the node
+        const directPath = leafNode.directPath();
+        for (const n of directPath) {
+            this.setNode(n.index, undefined);
+        }
+        // step 2: generate a new hpke key pair for the node
+        const leafKeyPair = await GenerateKeyPair(cipherSuite);
+        // generate the path secrets
+        const suite = DecodeCipherSuiteType(cipherSuite);
+        const pathSecrets = new Array<Uint8Array>();
+        const initialPathSecret = crypto.getRandomValues(new Uint8Array(suite.kdf.hashSize));
+        for (const [i, node] of this.filteredDirectPath(leafNode).entries()) {
+            pathSecrets[i] = await DeriveSecret(i === 0 ? initialPathSecret : pathSecrets[i - 1], new TextEncoder().encode("path"), cipherSuite);
+            // derive the node key pair using the secret
+            const nodeSecret = await DeriveSecret(pathSecrets[i], new TextEncoder().encode("node"), cipherSuite);
+            const nodeKeyPair = await DeriveKeyPair(nodeSecret, cipherSuite);
+            const nodeData = this.assertParentNode(node);
+            nodeData.private_key = nodeKeyPair.privateKey;
+            nodeData.encryption_key = nodeKeyPair.publicKey;
+            this.setNode(node.index, nodeData);
+        }
+        // time to generate parent hashes along the filtered direct path
+        await this.computeParentHashes(leafNode, cipherSuite);
+        // update this leaf node
+        let leafData = this.assertLeafNode(leafNode);
+        leafData = {
+            ...leafData,
+            private_key: leafKeyPair.privateKey,
+            encryption_key: leafKeyPair.publicKey,
+            leaf_node_source: LeafNodeSource.commit,
+            parent_hash: this.assertParentNode(leafNode.parent()).parent_hash
+        } satisfies LeafNodeCommit;
+        const leafNodeSignatureData = ConstructLeafNodeSignatureData(leafData, groupContext.group_id, Uint32.from(leafNode.index / 2));
+        leafData.signature = await SignWithLabel(
+            signature_key,
+            new TextEncoder().encode("LeafNodeTBS"),
+            leafNodeSignatureData,
+            cipherSuite
+        );
+        this.setNode(leafNode.index, leafData);
+        return pathSecrets;
+    }
+
+    async encryptPathSecrets(leafNode: IndexedType<RatchetTreeNode>, pathSecrets: Array<Uint8Array>, groupContext: GroupContext, cipherSuite: CipherSuiteType) {
+        const encryptedPaths = new Array<UpdatePathNode>();
+        const encodedGroupContext = EncodeGroupContext(groupContext);
+        const copath = leafNode.copath();
+        for (const [i, parent] of this.filteredDirectPath(leafNode).entries()) {
+            const copathChild = copath.find(c => c.parent().index === parent.index);
+            if (copathChild == null) {
+                throw new Error("Copath child not found (but should exist)");
+            }
+            const copathResolution = this.resolution(copathChild);
+            for (const copathNode of copathResolution) {
+                const copathData = this.assertParentNode(copathNode);
+                const { ciphertext, encKey } = await EncryptWithLabel(copathData.encryption_key, new TextEncoder().encode("UpdatePathNode"), encodedGroupContext, pathSecrets[i + 1], cipherSuite);
+                const updateNode = {
+                    encryption_key: copathData.encryption_key,
+                    encrypted_path_secret: {
+                        kem_output: encKey,
+                        ciphertext
+                    }
+                } satisfies UpdatePathNode;
+                encryptedPaths.push(updateNode);
+            }
+        }
+        return {
+            leaf_node: this.assertLeafNode(leafNode),
+            nodes: encryptedPaths
+        } satisfies UpdatePath
+    }
+
+    clone() {
+        return RatchetTree.buildFromNodes(this.nodes);
+    }
+
+    assertLeafNode(node?: IndexedType<RatchetTreeNode>) {
+        if (node == null) {
+            throw new Error("Node is null");
+        }
+        if (node.data == null) {
+            throw new Error("Node is not a leaf (blank)");
+        }
+        if (!IsLeafNode(node.data)) {
+            throw new Error("Node is not a leaf (different type)");
+        }
+        return node.data;
+    }
+
+    assertParentNode(node?: IndexedType<RatchetTreeNode>) {
+        if (node == null) {
+            throw new Error("Node is null");
+        }
+        if (node.data == null) {
+            throw new Error("Node is not a parent (blank)");
+        }
+        if (!IsParentNode(node.data)) {
+            throw new Error("Node is not a parent (different type)");
+        }
+        return node.data;
     }
 
     static buildFromLeaves(leaves: LeafNode[]) {
@@ -424,7 +600,7 @@ The resolution of a blank intermediate node is the result of concatenating the r
         return tree;
     }
 
-    static buildFromNodes(nodes: RatchetTreeNode[]) {
+    static buildFromNodes(nodes: Array<RatchetTreeNode | undefined>) {
         const tree = new RatchetTree(ArrayTree.reverseWidth(nodes.length));
         for (let i = 0; i < nodes.length; i++) {
             tree.setNode(i, nodes[i]);

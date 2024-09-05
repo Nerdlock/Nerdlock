@@ -2,7 +2,7 @@ import type { Decoder } from "../Encoding";
 import { ProposalType } from "../Enums";
 import InvalidObjectError from "../errors/InvalidObjectError";
 import { IsProposalBase, type ProposalBase } from "../Proposal";
-import { DecodeLeafNode, type LeafNode } from "../RatchetTree";
+import { DecodeLeafNode, IsLeafNode, type LeafNode } from "../RatchetTree";
 
 interface UpdateProposal extends ProposalBase {
     proposal_type: ProposalType.update;
@@ -13,7 +13,7 @@ function IsUpdateProposal(object: unknown): object is UpdateProposal {
     if (!IsProposalBase(object)) {
         return false;
     }
-    return object.proposal_type === ProposalType.update && "leaf_node" in object && object.leaf_node !== null;
+    return object.proposal_type === ProposalType.update && "leaf_node" in object && object.leaf_node !== null && IsLeafNode(object.leaf_node);
 }
 
 function DecodeUpdateProposal(base: ProposalBase, decoder: Decoder): UpdateProposal {

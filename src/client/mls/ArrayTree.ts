@@ -46,18 +46,18 @@ export type { IndexedType };
  * Undefined values represent a blank node.
  */
 export default class ArrayTree<T> {
-    #nodes = new Array<T | undefined>();
+    protected nodes = new Array<T | undefined>();
 
     constructor(leafCount: number) {
         validateNumber(leafCount);
         // get the largest power of 2 that is greater than or equal to the leafCount
         leafCount = log2(leafCount) + 1;
         const length = ArrayTree.width(leafCount);
-        this.#nodes = new Array<T | undefined>(length);
+        this.nodes = new Array<T | undefined>(length);
     }
 
     get nodeCount() {
-        return this.#nodes.length;
+        return this.nodes.length;
     }
 
     get leafCount() {
@@ -69,7 +69,7 @@ export default class ArrayTree<T> {
      * @returns The root node of the tree.
      */
     get root() {
-        const rootIndex = (1 << log2(this.#nodes.length)) - 1;
+        const rootIndex = (1 << log2(this.nodes.length)) - 1;
         const root = this.getIndexedNode(rootIndex);
         if (root === undefined) {
             throw new Error("Root not found");
@@ -211,7 +211,7 @@ export default class ArrayTree<T> {
     get leaves() {
         const leaves: IndexedTypeWithData<T>[] = [];
         let current = 0;
-        while (current < this.#nodes.length) {
+        while (current < this.nodes.length) {
             const leaf = this.getIndexedNode(current);
             if (leaf.data != null) {
                 leaves.push(leaf as IndexedTypeWithData<T>);
@@ -223,7 +223,7 @@ export default class ArrayTree<T> {
 
     get firstEmptyLeaf() {
         let current = 0;
-        while (current < this.#nodes.length) {
+        while (current < this.nodes.length) {
             const leaf = this.getIndexedNode(current);
             if (leaf.data == null) {
                 return leaf;
@@ -233,10 +233,22 @@ export default class ArrayTree<T> {
         return undefined;
     }
 
+    get lastNonBlankLeaf() {
+        let current = this.nodeCount - 1;
+        while (current >= 0) {
+            const leaf = this.getIndexedNode(current);
+            if (leaf.data != null) {
+                return leaf;
+            }
+            current -= 2;
+        }
+        return undefined;
+    }
+
     extend() {
         // extend the tree by N + 1 blank values where N is the number of nodes
         const newNodesLength = this.nodeCount + 1;
-        this.#nodes.length = newNodesLength;
+        this.nodes.length = newNodesLength;
         for (let i = 0; i < newNodesLength; i++) {
             this.setNode(i, undefined);
         }
@@ -245,7 +257,7 @@ export default class ArrayTree<T> {
     truncate() {
         // truncate the tree to its first (N-1) / 2 nodes
         const newNodes = (this.nodeCount - 1) >> 1;
-        this.#nodes.length = newNodes;
+        this.nodes.length = newNodes;
     }
 
     /**
@@ -254,10 +266,10 @@ export default class ArrayTree<T> {
      * @returns The node at the given index, with the index property set.
      */
     getIndexedNode(index: number) {
-        if (index < 0 || index >= this.#nodes.length) {
+        if (index < 0 || index >= this.nodes.length) {
             throw new Error("Invalid node index");
         }
-        const node = this.#nodes[index];
+        const node = this.nodes[index];
         const indexedNode = <IndexedType<T>>{ data: node, index };
         indexedNode.left = () => this.left(indexedNode);
         indexedNode.right = () => this.right(indexedNode);
@@ -271,10 +283,10 @@ export default class ArrayTree<T> {
     }
 
     setNode(index: number, node: T | undefined) {
-        if (index < 0 || index >= this.#nodes.length) {
+        if (index < 0 || index >= this.nodes.length) {
             throw new Error("Invalid node index");
         }
-        this.#nodes[index] = node;
+        this.nodes[index] = node;
     }
 
     /**

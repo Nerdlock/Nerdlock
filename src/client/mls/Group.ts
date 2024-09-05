@@ -1,26 +1,31 @@
-import type { Commit } from "./Commit";
+import { bytesToHex } from "@noble/hashes/utils";
+import type { Commit, ProposalOrRefProposal, UpdatePath } from "./Commit";
 import type { Credential } from "./Credential";
-import { ArraysEqual, DecodeCipherSuiteType, GenerateSigningKeyPair, MAC, VerifyWithLabel } from "./CryptoHelper";
-import { CipherSuiteType, CredentialType, ExtensionType, LeafNodeSource, ProtocolVersion, SenderType, WireFormat } from "./Enums";
+import { ArraysEqual, DecodeCipherSuiteType, DeriveSecret, GenerateSigningKeyPair, MAC, VerifyWithLabel } from "./CryptoHelper";
+import { CipherSuiteType, CredentialType, ExtensionType, LeafNodeSource, ProposalOrRefType, ProtocolVersion, SenderType, WireFormat } from "./Enums";
 import InvalidObjectError from "./errors/InvalidObjectError";
 import type { Extension } from "./Extension";
 import { type GroupContext } from "./GroupContext";
 import KeySchedule from "./KeySchedule";
-import { EncodeMLSMessage } from "./Message";
+import { ConstructFramedContentCommit, EncodeMLSMessage } from "./Message";
 import { ConstructKeyPackageSignatureData, type KeyPackage } from "./messages/KeyPackage";
 import { EncryptPrivateMessage } from "./messages/PrivateMessage";
 import type { Proposal } from "./Proposal";
-import type { AddProposal } from "./proposals/Add";
-import type { UpdateProposal } from "./proposals/Update";
+import { IsAddProposal, type AddProposal } from "./proposals/Add";
+import { IsRemoveProposal, type RemoveProposal } from "./proposals/Remove";
+import { IsUpdateProposal, type UpdateProposal } from "./proposals/Update";
 import RatchetTree, { ConstructLeafNodeSignatureData, GenerateLeafNode, type LeafNode } from "./RatchetTree";
 import Uint32 from "./types/Uint32";
 import Uint64 from "./types/Uint64";
+
+type ProposalFrom = Proposal & { proposal_from: Uint32 };
 
 class Group {
     #ratchetTree: RatchetTree;
     #groupContext: GroupContext;
     #keySchedule: KeySchedule;
     #leafIndex: Uint32 = Uint32.from(0);
+    #cachedProposals = new Array<ProposalFrom>();
 
     constructor(ratchetTree: RatchetTree, groupContext: GroupContext, keySchedule: KeySchedule) {
         this.#ratchetTree = ratchetTree;
@@ -97,7 +102,7 @@ class Group {
         const groupContext = this.#groupContext;
         const groupLeaves = this.#ratchetTree.leaves;
         const cipherSuite = groupContext.cipher_suite;
-        // validate credential
+        // TODO: validate credential
         // validate signature
         const signatureContent = ConstructLeafNodeSignatureData(
             node,
@@ -164,32 +169,56 @@ class Group {
         return true;
     }
 
-    async processAddProposal(proposal: AddProposal) {
-        // the proposal is only valid, if the key_package is valid
-        const keyPackageValid = await this.validateKeyPackage(proposal.key_package).catch(() => false);
-        if (!keyPackageValid) {
-            throw new InvalidObjectError("Key package is not valid");
-        }
+    async processAddProposal(proposal: AddProposal, ratchetTree: RatchetTree) {
         // add the new leaf node to the tree
-        this.#ratchetTree.addLeaf(proposal.key_package.leaf_node);
+        const addedNode = ratchetTree.addLeaf(proposal.key_package.leaf_node);
+        // set unmerged_leaves for each non-blank intermediate node along the direct path
+        const intermediates = addedNode.directPath().filter(n => n.data != null);
+        intermediates.pop();
+        for (const node of intermediates) {
+            if (node.data == null) {
+                continue;
+            }
+            const nodeData = ratchetTree.assertParentNode(node);
+            nodeData.unmerged_leaves.push(addedNode.index / 2);
+            // make sure unmerged_leaves is sorted in ascending order
+            nodeData.unmerged_leaves.sort((a, b) => a - b);
+            ratchetTree.setNode(node.index, nodeData);
+        }
     }
 
-    async processUpdateProposal(proposal: UpdateProposal, prevLeafNode: LeafNode, leaf_index: Uint32) {
-        // the proposal is only valid, if the leaf_node is valid
-        const leafNodeValid = await this.validateLeafNode(proposal.leaf_node, LeafNodeSource.update, leaf_index, prevLeafNode).catch(
-            () => false
-        );
-        if (!leafNodeValid) {
-            throw new InvalidObjectError("Leaf node is not valid");
-        }
+    async processUpdateProposal(proposal: UpdateProposal, leaf_index: Uint32, ratchetTree: RatchetTree) {
         // update the leaf node in the tree
-        this.#ratchetTree.setNode(leaf_index.value, proposal.leaf_node);
-        // go through every intermediate node and blank it
-        const nodes = this.#ratchetTree.directPath(this.#ratchetTree.getIndexedNode(leaf_index.value));
-        // pop the last node (the node)
+        ratchetTree.setNode(leaf_index.value, proposal.leaf_node);
+        // blank intermediate nodes
+        const nodes = this.#ratchetTree.directPath(ratchetTree.getIndexedNode(leaf_index.value));
         nodes.pop();
         for (const node of nodes) {
-            this.#ratchetTree.setNode(node.index, undefined);
+            ratchetTree.setNode(node.index, undefined);
+        }
+    }
+
+    async processRemoveProposal(proposal: RemoveProposal, ratchetTree: RatchetTree) {
+        // remove the leaf node from the tree
+        ratchetTree.setNode(proposal.removed.value, undefined);
+        // blank all intermediate nodes
+        const nodes = this.#ratchetTree.directPath(ratchetTree.getIndexedNode(proposal.removed.value));
+        nodes.pop();
+        for (const node of nodes) {
+            ratchetTree.setNode(node.index, undefined);
+        }
+        // Truncate the tree by removing the right subtree until there is at least one non-blank leaf node in the right subtree. If the rightmost non-blank leaf has index L, then this will result in the tree having 2d leaves, where d is the smallest value such that 2^d > L.
+        const lastNonBlankLeaf = ratchetTree.lastNonBlankLeaf;
+        if (lastNonBlankLeaf == null) {
+            throw new Error("No non-blank leaf nodes");
+        }
+        const leafIndex = lastNonBlankLeaf.index / 2;
+        let d = 0;
+        while (leafIndex >= (1 << d)) {
+            d++;
+        }
+        while (ratchetTree.leafCount !== (1 << d)) {
+            ratchetTree.truncate();
         }
     }
 
@@ -204,6 +233,136 @@ class Group {
     //         },
     //     } satisfies FramedContent;
     // }
+
+    async validateProposalList(proposals: ProposalFrom[]) {
+        const addedSignatureKeys = new Array<string>();
+        const updatedLeafNodes = new Array<number>();
+        const removedLeafNodes = new Array<number>();
+        // first check if there is any individual proposals that are not valid
+        for (const proposal of proposals) {
+            if (IsAddProposal(proposal)) {
+                // validate key package
+                const keyPackageValid = await this.validateKeyPackage(proposal.key_package).catch(() => false);
+                if (!keyPackageValid) {
+                    return false;
+                }
+                addedSignatureKeys.push(bytesToHex(proposal.key_package.leaf_node.signature_key));
+            }
+            if (IsUpdateProposal(proposal)) {
+                // assert that the updated leaf node is ours
+                if (proposal.proposal_from.value === this.#leafIndex.value) {
+                    return false;
+                }
+                // validate leaf node
+                const prev_leaf_node = this.#ratchetTree.getIndexedNode(proposal.proposal_from.value * 2);
+                if (prev_leaf_node.data == null) {
+                    return false;
+                }
+                const leafNodeValid = await this.validateLeafNode(proposal.leaf_node, LeafNodeSource.update, proposal.proposal_from, prev_leaf_node.data as LeafNode).catch(() => false);
+                if (!leafNodeValid) {
+                    return false;
+                }
+                updatedLeafNodes.push(proposal.proposal_from.value);
+            }
+            if (IsRemoveProposal(proposal)) {
+                // assert that the removed leaf node is ours
+                if (proposal.removed.value === this.#leafIndex.value) {
+                    return false;
+                }
+                // assert that the removed leaf node is non-blank
+                const node = this.#ratchetTree.getIndexedNode(proposal.removed.value * 2);
+                if (node.data == null) {
+                    return false;
+                }
+                removedLeafNodes.push(proposal.removed.value);
+            }
+        }
+        // check for update/remove proposals that apply to the same leaf node
+        const updateRemoveSet = new Set([...updatedLeafNodes, ...removedLeafNodes]);
+        if (updateRemoveSet.size !== updatedLeafNodes.length + removedLeafNodes.length) {
+            return false;
+        }
+        // check for add proposals that add the same user
+        const addSet = new Set(addedSignatureKeys);
+        if (addSet.size !== addedSignatureKeys.length) {
+            return false;
+        }
+        // TODO: complete the rest of the checks
+        return true;
+    }
+
+    async applyProposalList(proposals: ProposalFrom[]) {
+        const newRatchetTree = this.#ratchetTree.clone();
+        // apply update proposals
+        const updateProposals = proposals.filter(IsUpdateProposal);
+        for (const proposal of updateProposals) {
+            await this.processUpdateProposal(proposal as UpdateProposal, proposal.proposal_from, newRatchetTree);
+        }
+        // apply remove proposals
+        const removeProposals = proposals.filter(IsRemoveProposal);
+        for (const proposal of removeProposals) {
+            await this.processRemoveProposal(proposal as RemoveProposal, newRatchetTree);
+        }
+        // apply add proposals
+        const addProposals = proposals.filter(IsAddProposal);
+        for (const proposal of addProposals) {
+            await this.processAddProposal(proposal as AddProposal, newRatchetTree);
+        }
+        this.#ratchetTree = newRatchetTree;
+    }
+
+    async createCommit(proposals: Proposal[], signature_key: Uint8Array) {
+        const finalProposals = new Array<ProposalFrom>();
+        finalProposals.push(...this.#cachedProposals);
+        finalProposals.push(...proposals.map((p) => ({ ...p, proposal_from: this.#leafIndex })));
+        this.#cachedProposals.length = 0;
+        // validate the proposals
+        if (!await this.validateProposalList(finalProposals)) {
+            throw new Error("Invalid proposals");
+        }
+        const newRatchetTree = this.#ratchetTree.clone();
+        let newGroupContext = {
+            ...this.#groupContext,
+            epoch: this.#groupContext.epoch.add(Uint64.from(1n))
+        } satisfies GroupContext;
+        await this.applyProposalList(finalProposals);
+        const shouldPopulatePath = finalProposals.some(p => IsUpdateProposal(p) || IsRemoveProposal(p));
+        let path: UpdatePath | undefined = undefined;
+        let commit_secret: Uint8Array | undefined = undefined;
+        // perform the direct path update, if needed
+        if (shouldPopulatePath) {
+            const pathSecrets = await newRatchetTree.updateDirectPath(newRatchetTree.getIndexedNode(this.#leafIndex.value / 2), this.#groupContext, signature_key, this.#groupContext.cipher_suite);
+            commit_secret = await DeriveSecret(pathSecrets.at(-1) as Uint8Array, new TextEncoder().encode("path"), this.#groupContext.cipher_suite);
+            newGroupContext= {
+                ...newGroupContext,
+                tree_hash: await newRatchetTree.hash(newRatchetTree.root, this.#groupContext.cipher_suite)
+            } satisfies GroupContext;
+            path = await newRatchetTree.encryptPathSecrets(newRatchetTree.getIndexedNode(this.#leafIndex.value / 2), pathSecrets, newGroupContext, this.#groupContext.cipher_suite);
+
+        }
+        const commit = {
+            proposals: finalProposals.map(p => ({ proposal: p, type: ProposalOrRefType.proposal } satisfies ProposalOrRefProposal)),
+            path
+        } satisfies Commit;
+        const suite = DecodeCipherSuiteType(this.#groupContext.cipher_suite);
+        if(commit_secret == null) {
+            commit_secret = new Uint8Array(suite.kdf.hashSize).fill(0);
+        }
+        await ConstructFramedContentCommit({
+            group_id: this.#groupContext.group_id,
+            epoch: this.#groupContext.epoch,
+            sender: {
+                sender_type: SenderType.member,
+                leaf_index: this.#leafIndex
+            },
+            commit,
+            wire_format: WireFormat.mls_private_message,
+            group_context: this.#groupContext,
+            signature_key: signature_key,
+            cipher_suite: this.#groupContext.cipher_suite,
+            authenticated_data: new Uint8Array([0xde, 0xad, 0xbe, 0xef])
+        })
+    }
 
     /**
      * Create a new group with the given parameters.
